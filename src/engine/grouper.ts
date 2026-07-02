@@ -1,14 +1,11 @@
 import type { AuditGroup, AuditItem } from '../shared/types'
 
 // ---------------------------------------------------------------------------
-// Generic grouper
+// Generic async grouper
 //
-// Takes AuditItem<TProperties>[], a normalize function, and a describe
-// function. Produces AuditGroup<TProperties>[] sorted by count descending.
-//
-// Async: yields every CHUNK items so the plugin thread stays responsive
-// on files with hundreds of thousands of items. Checks isCancelled() at
-// each yield point.
+// Yields every CHUNK items during normalization so the plugin thread stays
+// responsive on files with hundreds of thousands of items.
+// isCancelled() is checked at each yield and after sorting.
 // ---------------------------------------------------------------------------
 
 const CHUNK = 1000
@@ -39,6 +36,7 @@ export async function groupItems<TProperties>(
   const tGroupStart = Date.now()
   const buckets = new Map<string, AuditItem<TProperties>[]>()
 
+  // ── Normalisation + bucketing ──────────────────────────────────────
   for (let i = 0; i < items.length; i++) {
     if (i % CHUNK === 0 && i > 0) {
       await new Promise<void>((r) => setTimeout(r, 0))
@@ -58,6 +56,7 @@ export async function groupItems<TProperties>(
 
   const groupingMs = Date.now() - tGroupStart
 
+  // ── Build group objects ─────────────────────────────────────────
   const groups: AuditGroup<TProperties>[] = []
   for (const [key, bucket] of buckets) {
     const descriptor = bucket[0].properties
@@ -71,9 +70,16 @@ export async function groupItems<TProperties>(
     })
   }
 
+  // ── Sort ─────────────────────────────────────────────────────────
   const tSortStart = Date.now()
   groups.sort((a, b) => b.count - a.count)
   const sortingMs = Date.now() - tSortStart
+
+  // Check cancellation after the synchronous sort. If the user cancelled
+  // during this window, discard results rather than propagating partial data.
+  if (isCancelled()) {
+    return { groups: [], groupingMs, sortingMs }
+  }
 
   return { groups, groupingMs, sortingMs }
 }

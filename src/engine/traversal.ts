@@ -3,13 +3,6 @@ import type { ScannerAdapter } from './types'
 
 // ---------------------------------------------------------------------------
 // String intern pool
-//
-// Shared across all engine traversal calls and by module extractors
-// (scanner.ts imports intern from here).
-// Deduplicates repeated string values: page names, parent names, font
-// families, font styles. At 500K nodes, without interning each bridge
-// property access returns a fresh string object even for identical values.
-// With interning: all nodes using "Inter" share one JS string object.
 // ---------------------------------------------------------------------------
 const _stringPool = new Map<string, string>()
 
@@ -21,14 +14,75 @@ export function intern(s: string): string {
 }
 
 // ---------------------------------------------------------------------------
-// Traversal constants
+// Constants
 // ---------------------------------------------------------------------------
 
-/** Nodes processed between async yields. Keeps the plugin thread responsive. */
+/**
+ * Total nodes visited between async yields during traversal.
+ * Covers text + non-text nodes. 500 nodes ≈ 1–5ms of traversal work,
+ * keeping the plugin thread responsive without excessive yield overhead.
+ */
+const TRAVERSAL_CHUNK = 500
+
+/** Nodes extracted between async yields during the extraction phase. */
 const YIELD_EVERY = 200
 
 /** Minimum elapsed time between progress events sent to the UI. */
 const PROGRESS_THROTTLE_MS = 150
+
+// ---------------------------------------------------------------------------
+// Iterative DFS node collector
+//
+// Replaces the former recursive collectNodes().
+//
+// Why iterative:
+// 1. Stack safety — deeply nested component hierarchies (component inside
+//    component inside frame, many levels deep) will eventually overflow
+//    the JS call stack with recursive DFS. An explicit stack is unbounded.
+// 2. Yield points — a recursive function cannot suspend mid-execution.
+//    The iterative loop can yield every TRAVERSAL_CHUNK nodes, keeping
+//    the plugin thread responsive and allowing cancel signals to be
+//    processed between bursts.
+//
+// DFS order is preserved: children are pushed in reverse order so the
+// first child is popped first, matching left-to-right document order.
+//
+// Returns true if cancelled, false if traversal completed normally.
+// ---------------------------------------------------------------------------
+
+async function collectNodesIterative<TNode extends BaseNode>(
+  root: BaseNode,
+  accepts: (node: BaseNode) => node is TNode,
+  results: TNode[],
+  isCancelled: () => boolean
+): Promise<boolean> {
+  const stack: BaseNode[] = [root]
+  let visited = 0
+
+  while (stack.length > 0) {
+    const node = stack.pop()!
+    visited++
+
+    if (accepts(node)) {
+      results.push(node)
+    }
+
+    if ('children' in node) {
+      // Push in reverse order to maintain left-to-right DFS visit order.
+      const children = (node as ChildrenMixin).children
+      for (let i = children.length - 1; i >= 0; i--) {
+        stack.push(children[i])
+      }
+    }
+
+    if (visited % TRAVERSAL_CHUNK === 0) {
+      await new Promise<void>((r) => setTimeout(r, 0))
+      if (isCancelled()) return true
+    }
+  }
+
+  return false
+}
 
 // ---------------------------------------------------------------------------
 // Types
@@ -45,28 +99,7 @@ export interface TraversalResult<TProperties> {
 }
 
 // ---------------------------------------------------------------------------
-// Generic node collector — iterates the subtree under root, collecting
-// all nodes for which accepts() returns true.
-// ---------------------------------------------------------------------------
-
-function collectNodes<TNode extends BaseNode>(
-  root: BaseNode,
-  accepts: (node: BaseNode) => node is TNode,
-  results: TNode[]
-): void {
-  if (accepts(root)) {
-    results.push(root)
-  }
-  if ('children' in root) {
-    for (const child of (root as ChildrenMixin).children) {
-      collectNodes(child, accepts, results)
-    }
-  }
-}
-
-// ---------------------------------------------------------------------------
-// Public entry point: traverses the document for the given scope,
-// applies the adapter's accepts/extract pair, and returns AuditItems.
+// Public entry point
 // ---------------------------------------------------------------------------
 
 export async function traverseAndExtract<TNode extends BaseNode, TProperties>(
@@ -82,6 +115,14 @@ export async function traverseAndExtract<TNode extends BaseNode, TProperties>(
     progressEventCount++
   }
 
+  const empty = (traversalMs: number): TraversalResult<TProperties> => ({
+    items: [],
+    traversalMs,
+    extractionMs: 0,
+    nodeCount: 0,
+    progressEventCount,
+  })
+
   sendProgress({ current: 0, total: 0, phase: 'collecting', label: 'Collecting layers…' })
 
   // ── Traversal ────────────────────────────────────────────────────
@@ -93,27 +134,40 @@ export async function traverseAndExtract<TNode extends BaseNode, TProperties>(
   if (scope === 'selection') {
     const sel = figma.currentPage.selection
     if (sel.length === 0) {
-      return { items: [], traversalMs: Date.now() - tTraversalStart, extractionMs: 0, nodeCount: 0, progressEventCount }
+      return empty(Date.now() - tTraversalStart)
     }
     for (const node of sel) {
-      collectNodes(node, adapter.accepts, matchedNodes)
+      const cancelled = await collectNodesIterative(node, adapter.accepts, matchedNodes, isCancelled)
+      if (cancelled) return empty(Date.now() - tTraversalStart)
     }
   } else if (scope === 'page') {
-    collectNodes(figma.currentPage, adapter.accepts, matchedNodes)
+    const cancelled = await collectNodesIterative(
+      figma.currentPage,
+      adapter.accepts,
+      matchedNodes,
+      isCancelled
+    )
+    if (cancelled) return empty(Date.now() - tTraversalStart)
   } else {
-    // file scope: load every page, tag each collected node with its page.
+    // file scope: load every page, traverse each, tag nodes with their page.
     await figma.loadAllPagesAsync()
+
     for (const page of figma.root.children) {
-      if (isCancelled()) {
-        return { items: [], traversalMs: Date.now() - tTraversalStart, extractionMs: 0, nodeCount: 0, progressEventCount }
-      }
-      sendProgress({ current: 0, total: 0, phase: 'collecting', label: `Loading page "${page.name}"…` })
+      if (isCancelled()) return empty(Date.now() - tTraversalStart)
+
+      sendProgress({
+        current: 0,
+        total: 0,
+        phase: 'collecting',
+        label: `Traversing page "${page.name}"…`,
+      })
 
       const countBefore = matchedNodes.length
-      collectNodes(page, adapter.accepts, matchedNodes)
+      const cancelled = await collectNodesIterative(page, adapter.accepts, matchedNodes, isCancelled)
+      if (cancelled) return empty(Date.now() - tTraversalStart)
 
-      // Tag newly found nodes with this page's info in O(1).
-      // Eliminates the former O(N²) findPageForNode() pattern.
+      // Tag every newly collected node with this page's info in O(1).
+      // Eliminates the former O(N²) per-node page search.
       const pageInfo: PageInfo = { pageId: page.id, pageName: intern(page.name) }
       for (let i = countBefore; i < matchedNodes.length; i++) {
         nodeToPage.set(matchedNodes[i].id, pageInfo)
@@ -137,10 +191,18 @@ export async function traverseAndExtract<TNode extends BaseNode, TProperties>(
 
   for (let i = 0; i < matchedNodes.length; i++) {
     if (i % YIELD_EVERY === 0) {
+      // Always yield — keeps plugin thread responsive regardless of
+      // whether a progress update is due.
       await new Promise<void>((r) => setTimeout(r, 0))
 
       if (isCancelled()) {
-        return { items: [], traversalMs, extractionMs: Date.now() - tExtractionStart, nodeCount, progressEventCount }
+        return {
+          items: [],
+          traversalMs,
+          extractionMs: Date.now() - tExtractionStart,
+          nodeCount,
+          progressEventCount,
+        }
       }
 
       const now = Date.now()
@@ -175,12 +237,12 @@ export async function traverseAndExtract<TNode extends BaseNode, TProperties>(
     })
   }
 
-  // Guaranteed final progress at 100% before returning.
+  // Guaranteed final progress event at 100% before returning.
   sendProgress({ current: total, total, phase: 'grouping', label: 'Grouping results…' })
 
   const extractionMs = Date.now() - tExtractionStart
 
-  // Release matched node references before grouping phase begins.
+  // Release matched node proxy references before the grouping phase.
   matchedNodes.length = 0
 
   return { items, traversalMs, extractionMs, nodeCount, progressEventCount }
