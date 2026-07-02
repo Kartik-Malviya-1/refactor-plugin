@@ -1,0 +1,168 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://github.com/Kartik-Malviya-1/refactor-plugin/docs/benchmark-schema.json",
+  "title": "Refactor Benchmark History Entry",
+  "description": "Schema for a single performance benchmark entry in PERFORMANCE_HISTORY.md. Entries are produced by the RUN_BENCHMARKS console command and stored manually.",
+  "type": "object",
+  "required": ["date", "commit", "sprint", "benchmark"],
+  "properties": {
+    "date": {
+      "type": "string",
+      "format": "date",
+      "description": "Date of the benchmark run in YYYY-MM-DD format.",
+      "examples": ["2025-07-02"]
+    },
+    "commit": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{7,40}$",
+      "description": "Short or full git commit SHA at the time of the benchmark.",
+      "examples": ["7f634c2", "7f634c2aabd9ef28e993d0f3e78ea46416bc6cf0"]
+    },
+    "sprint": {
+      "type": "string",
+      "description": "Version label or sprint identifier.",
+      "examples": ["v0.1.1", "v0.2.0"]
+    },
+    "notes": {
+      "type": "string",
+      "description": "Optional notes about the benchmark run or architectural context."
+    },
+    "benchmark": {
+      "type": "object",
+      "description": "Results from the synthetic benchmark runner (RUN_BENCHMARKS).",
+      "required": ["normalizationItemsPerSec", "groupingItemsPerSec"],
+      "properties": {
+        "normalizationItemsPerSec": {
+          "type": ["number", "null"],
+          "minimum": 0,
+          "description": "Throughput of normalizeTypographyProps() in items per second. Null if pending."
+        },
+        "groupingItemsPerSec": {
+          "type": ["number", "null"],
+          "minimum": 0,
+          "description": "Throughput of groupItems() (enterprise scenario, 32K items) in items per second."
+        },
+        "groupingScalingFactor": {
+          "type": ["number", "null"],
+          "minimum": 1.0,
+          "description": "Average growth ratio when input doubles (1K→64K doubling series). 2.0 = linear."
+        },
+        "scalingLinear": {
+          "type": ["boolean", "null"],
+          "description": "True if average scaling factor was within the linear budget (≤2.3×)."
+        },
+        "sortingGroupsPerSec": {
+          "type": ["number", "null"],
+          "minimum": 0,
+          "description": "Throughput of groups.sort() in groups per second."
+        },
+        "serializationMs": {
+          "type": ["number", "null"],
+          "minimum": 0,
+          "description": "Time in ms to JSON.stringify an AuditResult with 32K items."
+        },
+        "payloadKB": {
+          "type": ["number", "null"],
+          "minimum": 0,
+          "description": "Serialized payload size in KB for 32K items."
+        },
+        "regressionDetected": {
+          "type": ["boolean", "null"],
+          "description": "True if the runner detected any stage below regression threshold."
+        }
+      }
+    },
+    "profiler": {
+      "type": "object",
+      "description": "Results from the live in-plugin profiler on a real Figma file. Optional — requires a manual scan.",
+      "properties": {
+        "file": {
+          "type": "string",
+          "description": "Description of the file used (e.g., \"enterprise-design-system.fig\", \"400 text layers\")."
+        },
+        "scope": {
+          "type": "string",
+          "enum": ["selection", "page", "file"],
+          "description": "Scan scope used."
+        },
+        "nodeCount": {
+          "type": ["integer", "null"],
+          "minimum": 0,
+          "description": "Number of text layers scanned."
+        },
+        "traversalMs": {
+          "type": ["number", "null"],
+          "minimum": 0,
+          "description": "Tree traversal time in ms."
+        },
+        "extractionMs": {
+          "type": ["number", "null"],
+          "minimum": 0,
+          "description": "Property extraction time in ms (includes async yields)."
+        },
+        "normalizationMs": {
+          "type": ["number", "null"],
+          "minimum": 0,
+          "description": "Normalization + bucketing time in ms."
+        },
+        "sortingMs": {
+          "type": ["number", "null"],
+          "minimum": 0,
+          "description": "Sorting time in ms."
+        },
+        "constructionMs": {
+          "type": ["number", "null"],
+          "minimum": 0,
+          "description": "AuditResult object construction time in ms."
+        },
+        "messagingMs": {
+          "type": ["number", "null"],
+          "minimum": 0,
+          "description": "postMessage (structured-clone) time in ms."
+        },
+        "totalMs": {
+          "type": ["number", "null"],
+          "minimum": 0,
+          "description": "End-to-end scan time in ms."
+        },
+        "progressEvents": {
+          "type": ["integer", "null"],
+          "minimum": 0,
+          "description": "Number of SCAN_PROGRESS messages sent during the scan."
+        }
+      }
+    }
+  },
+  "additionalProperties": false,
+  "examples": [
+    {
+      "date": "2025-07-02",
+      "commit": "7f634c2",
+      "sprint": "v0.1.1",
+      "notes": "Post-sprint baseline after O(n²) fix, string interning, Core Scan Engine, chunked pipeline.",
+      "benchmark": {
+        "normalizationItemsPerSec": null,
+        "groupingItemsPerSec": null,
+        "groupingScalingFactor": null,
+        "scalingLinear": null,
+        "sortingGroupsPerSec": null,
+        "serializationMs": null,
+        "payloadKB": null,
+        "regressionDetected": null
+      },
+      "profiler": {
+        "file": "pending",
+        "scope": "page",
+        "nodeCount": null,
+        "traversalMs": null,
+        "extractionMs": null,
+        "normalizationMs": null,
+        "sortingMs": null,
+        "constructionMs": null,
+        "messagingMs": null,
+        "totalMs": null,
+        "progressEvents": null
+      }
+    }
+  ]
+}

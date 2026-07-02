@@ -9,9 +9,7 @@ import { BASELINES, REGRESSION_THRESHOLD, PAYLOAD_WARNING_BYTES } from './baseli
 // Output helpers
 // ---------------------------------------------------------------------------
 
-function fmt(n: number): string {
-  return n.toLocaleString()
-}
+function fmt(n: number): string { return n.toLocaleString() }
 
 function fmtMs(ms: number): string {
   if (ms >= 1000) return `${(ms / 1000).toFixed(2)}s`
@@ -39,7 +37,6 @@ function rate(count: number, ms: number): number {
 // Stage runners
 // ---------------------------------------------------------------------------
 
-/** Measures normalizeTypographyProps() throughput on a pre-built fixture. */
 function benchNormalization(items: AuditItem<TypographyProperties>[]): number {
   const t = Date.now()
   for (const item of items) normalizeTypographyProps(item.properties)
@@ -53,10 +50,9 @@ interface GroupBench {
   sortingMs: number
   groups: number
   itemsPerSec: number
-  sortItemsPerSec: number  // groups sorted per second (sorting is O(K log K))
+  sortGroupsPerSec: number
 }
 
-/** Runs groupItems() and returns per-stage timings from GrouperResult. */
 async function benchGrouper(
   items: AuditItem<TypographyProperties>[]
 ): Promise<GroupBench> {
@@ -71,11 +67,11 @@ async function benchGrouper(
   const totalMs = Date.now() - t
   return {
     totalMs,
-    groupingMs: result.groupingMs,
-    sortingMs:  result.sortingMs,
-    groups:     result.groups.length,
-    itemsPerSec: rate(items.length, totalMs),
-    sortItemsPerSec: rate(result.groups.length, result.sortingMs),
+    groupingMs:      result.groupingMs,
+    sortingMs:       result.sortingMs,
+    groups:          result.groups.length,
+    itemsPerSec:     rate(items.length, totalMs),
+    sortGroupsPerSec: rate(result.groups.length, result.sortingMs),
   }
 }
 
@@ -85,19 +81,13 @@ interface SerialBench {
   itemsPerSec: number
 }
 
-/** Benchmarks JSON.stringify on a synthetic AuditResult. */
 function benchSerialization(
   groups: AuditGroup<TypographyProperties>[],
   totalItems: number
 ): SerialBench {
   const result: AuditResult = {
-    moduleId: 'typography',
-    scope: 'page',
-    scopeLabel: 'Benchmark',
-    totalItems,
-    groups,
-    scannedAt: Date.now(),
-    durationMs: 0,
+    moduleId: 'typography', scope: 'page', scopeLabel: 'Benchmark',
+    totalItems, groups, scannedAt: Date.now(), durationMs: 0,
   }
   const t = Date.now()
   const serialized = JSON.stringify(result)
@@ -128,9 +118,7 @@ async function runScalingSeries(): Promise<ScalingRow[]> {
     const bench = await benchGrouper(items)
     const growthFactor = prevMs > 0 && bench.totalMs > 0 ? bench.totalMs / prevMs : null
     rows.push({
-      items: size,
-      ms: bench.totalMs,
-      itemsPerSec: bench.itemsPerSec,
+      items: size, ms: bench.totalMs, itemsPerSec: bench.itemsPerSec,
       growthFactor,
       withinBudget: growthFactor === null || growthFactor <= BASELINES.grouping.maxScalingFactor,
     })
@@ -153,12 +141,8 @@ const STRESS_SCENARIOS: Array<{ scenario: BenchmarkScenario; description: string
 ]
 
 interface StressRow {
-  scenario: string
-  ms: number
-  itemsPerSec: number
-  groups: number
-  sortingMs: number
-  description: string
+  scenario: string; ms: number; itemsPerSec: number
+  groups: number; sortingMs: number; description: string
 }
 
 async function runStressScenarios(size: number): Promise<StressRow[]> {
@@ -167,15 +151,75 @@ async function runStressScenarios(size: number): Promise<StressRow[]> {
     const items = generateFixture(size, scenario)
     const bench = await benchGrouper(items)
     rows.push({
-      scenario,
-      ms:          bench.totalMs,
-      itemsPerSec: bench.itemsPerSec,
-      groups:      bench.groups,
-      sortingMs:   bench.sortingMs,
-      description,
+      scenario, ms: bench.totalMs, itemsPerSec: bench.itemsPerSec,
+      groups: bench.groups, sortingMs: bench.sortingMs, description,
     })
   }
   return rows
+}
+
+// ---------------------------------------------------------------------------
+// History entry formatter
+//
+// Prints a block at the end of every benchmark run ready to copy-paste
+// into PERFORMANCE_HISTORY.md. The developer fills in the commit SHA
+// and any profiler data from live scans.
+// ---------------------------------------------------------------------------
+
+function printHistoryEntry(
+  normRate: number,
+  enterpriseRow: StressRow,
+  scalingFactor: number,
+  scalingLinear: boolean,
+  serial: SerialBench,
+  regressionFound: boolean
+): void {
+  const today = new Date().toISOString().slice(0, 10)
+  const payloadKB = Math.round(serial.payloadBytes / 1024)
+
+  const entry = {
+    date: today,
+    commit: '<paste short git SHA>',
+    sprint: '<e.g. v0.1.1>',
+    notes: '<optional notes>',
+    benchmark: {
+      normalizationItemsPerSec:  normRate,
+      groupingItemsPerSec:       enterpriseRow.itemsPerSec,
+      groupingScalingFactor:     parseFloat(scalingFactor.toFixed(2)),
+      scalingLinear,
+      sortingGroupsPerSec:       rate(enterpriseRow.groups, enterpriseRow.sortingMs),
+      serializationMs:           serial.ms,
+      payloadKB,
+      regressionDetected:        regressionFound,
+    },
+    profiler: {
+      file:           '<file description>',
+      scope:          'page',
+      nodeCount:      null,
+      traversalMs:    null,
+      extractionMs:   null,
+      normalizationMs: null,
+      sortingMs:      null,
+      constructionMs: null,
+      messagingMs:    null,
+      totalMs:        null,
+      progressEvents: null,
+    },
+  }
+
+  const W = 64
+  console.log('')
+  console.log('  ┌─ History Entry ──────────────────────────────────────────────┐')
+  console.log('  │  Copy this block into PERFORMANCE_HISTORY.md              │')
+  console.log('  │  Fill in commit SHA and profiler data from a live scan.   │')
+  console.log('  └' + '─'.repeat(W - 2) + '┘')
+  console.log('')
+  console.log(JSON.stringify(entry, null, 2)
+    .split('\n')
+    .map(line => `  ${line}`)
+    .join('\n')
+  )
+  console.log('')
 }
 
 // ---------------------------------------------------------------------------
@@ -229,13 +273,15 @@ export async function runAllBenchmarks(): Promise<void> {
     )
   }
 
-  const avgFactor = factors.length > 0 ? (factors.reduce((a, b) => a + b) / factors.length).toFixed(1) : 'n/a'
-  const budget    = BASELINES.grouping.maxScalingFactor
+  const avgFactor  = factors.length > 0
+    ? factors.reduce((a, b) => a + b) / factors.length
+    : 0
+  const budget = BASELINES.grouping.maxScalingFactor
   console.log('')
   if (nonLinear) {
-    console.log(`  ⚠  Non-linear growth detected (avg ${avgFactor}×, budget ≤${budget}×)`)
+    console.log(`  ⚠  Non-linear growth detected (avg ${avgFactor.toFixed(1)}×, budget ≤${budget}×)`)
   } else {
-    console.log(`  Scaling: LINEAR ✓  (avg ${avgFactor}×, budget ≤${budget}×)`)
+    console.log(`  Scaling: LINEAR ✓  (avg ${avgFactor.toFixed(1)}×, budget ≤${budget}×)`)
   }
   console.log('')
 
@@ -293,13 +339,12 @@ export async function runAllBenchmarks(): Promise<void> {
 
   const enterpriseRow = stressRows.find(r => r.scenario === 'enterprise')!
   const checks: Array<{ name: string; actual: number; key: keyof typeof BASELINES }> = [
-    { name: 'normalization', actual: normRate,                     key: 'normalization' },
-    { name: 'grouping',      actual: enterpriseRow.itemsPerSec,   key: 'grouping' },
-    { name: 'serialization', actual: serial.itemsPerSec,          key: 'serialization' },
+    { name: 'normalization', actual: normRate,                   key: 'normalization' },
+    { name: 'grouping',      actual: enterpriseRow.itemsPerSec, key: 'grouping' },
+    { name: 'serialization', actual: serial.itemsPerSec,        key: 'serialization' },
   ]
 
   let regressionFound = false
-
   for (const { name, actual, key } of checks) {
     const baseline = BASELINES[key]
     const minOk    = baseline.minItemsPerSec * REGRESSION_THRESHOLD
@@ -325,5 +370,16 @@ export async function runAllBenchmarks(): Promise<void> {
 
   console.log('')
   console.log(`  ${eq}`)
-  console.log('')
+
+  // ── History entry ────────────────────────────────────────────────────
+  // Printed after every run so developers can copy-paste into
+  // PERFORMANCE_HISTORY.md without manual formatting.
+  printHistoryEntry(
+    normRate,
+    enterpriseRow,
+    avgFactor,
+    !nonLinear,
+    serial,
+    regressionFound
+  )
 }
