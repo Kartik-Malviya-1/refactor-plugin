@@ -59,9 +59,6 @@ function printScanProfile(stages: ProfileStage[], totalMs: number): void {
   console.log('  └' + '─'.repeat(NAME_COL + VAL_COL + 13) + '┘')
   console.log(`  Nodes scanned: ${_scanTimings.nodeCount}`)
 
-  // ── Before / After: Extraction ──────────────────────────────────────
-  // The micro-benchmark ran both extractors on the same sample nodes;
-  // we extrapolate to the full node count so both numbers are comparable.
   if (_scanTimings.benchSampleSize > 0) {
     const n         = _scanTimings.nodeCount
     const oldEstMs  = Math.round(_scanTimings.benchBaselineMsPerNode * n)
@@ -149,7 +146,12 @@ figma.ui.onmessage = async (rawMsg: unknown) => {
               ? figma.currentPage.name
               : 'Entire File'
 
-        // ── Stage: Serialization ──────────────────────────────────────────
+        // ── Stage: Construction ───────────────────────────────────────────
+        // Measure only the cost of assembling the AuditResult object.
+        // Previously this stage ran void JSON.stringify(result) to measure
+        // serialisation cost, which caused the entire result to be serialised
+        // twice — once here and once inside postMessage's structured clone.
+        // Removed. msgMs below now captures the real structured-clone cost.
         const tSerial = Date.now()
         const result: AuditResult = {
           moduleId,
@@ -160,24 +162,22 @@ figma.ui.onmessage = async (rawMsg: unknown) => {
           scannedAt: tTotal,
           durationMs: Date.now() - tTotal,
         }
-        void JSON.stringify(result)
         const serialMs = Date.now() - tSerial
 
-        // ── Stage: Messaging ──────────────────────────────────────────────
+        // ── Stage: Messaging (includes structured-clone cost) ─────────────
         const tMsg = Date.now()
         send({ type: 'SCAN_COMPLETE', payload: result })
         const msgMs = Date.now() - tMsg
 
         const totalMs = Date.now() - tTotal
 
-        // ── Profile report ────────────────────────────────────────────────
         printScanProfile(
           [
             { name: 'Traversal',     ms: _scanTimings.traversalMs },
             { name: 'Extraction',    ms: _scanTimings.extractionMs },
             { name: 'Normalization', ms: _groupTimings.normalizationMs },
             { name: 'Sorting',       ms: _groupTimings.sortingMs },
-            { name: 'Serialization', ms: serialMs },
+            { name: 'Construction',  ms: serialMs },
             { name: 'Messaging',     ms: msgMs },
           ],
           totalMs

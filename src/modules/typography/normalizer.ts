@@ -17,15 +17,10 @@ function lsKey(ls: NormalizedLetterSpacing): string {
 
 export function normalizeTypography(item: AuditItem<TypographyProperties>): string {
   const p = item.properties
-  return [
-    p.fontFamily,
-    p.fontStyle,
-    roundTo(p.fontSize, 2),
-    lhKey(p.lineHeight),
-    lsKey(p.letterSpacing),
-    p.textCase,
-    p.textDecoration,
-  ].join('|')
+  // Template literal avoids allocating a throwaway 7-element Array per call.
+  // normalizeTypography is called once per item in group(); at 500K items
+  // that is 500K Array objects eliminated from the GC workload.
+  return `${p.fontFamily}|${p.fontStyle}|${roundTo(p.fontSize, 2)}|${lhKey(p.lineHeight)}|${lsKey(p.letterSpacing)}|${p.textCase}|${p.textDecoration}`
 }
 
 export function styleToWeight(style: string): number {

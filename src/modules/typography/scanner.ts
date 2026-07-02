@@ -9,14 +9,34 @@ export const _scanTimings = {
   traversalMs: 0,
   extractionMs: 0,
   nodeCount: 0,
-  // Before/after benchmark (populated by the micro-benchmark in scanTypography)
   benchSampleSize: 0,
-  benchBaselineMsPerNode: 0,   // double-access approach (before optimisation)
-  benchOptimizedMsPerNode: 0,  // single-cache approach  (after optimisation)
+  benchBaselineMsPerNode: 0,
+  benchOptimizedMsPerNode: 0,
 }
 
-// How many nodes to sample for the before/after micro-benchmark.
 const BENCH_SAMPLE = 20
+
+// ---------------------------------------------------------------------------
+// String intern pool
+//
+// Font families ("Inter"), font styles ("Regular"), page names, and parent
+// frame names repeat across thousands of nodes. Each Figma bridge property
+// access returns a new JS string object even when the value is identical.
+// Without interning: 50K nodes using "Inter" = 50K separate string objects.
+// With interning:    50K nodes using "Inter" = 1 string object, shared.
+//
+// The pool is module-level so it stays warm across rescans in the same
+// plugin session. Its size is bounded by the number of unique string values
+// ever seen (font families + styles + page names — typically < 200 entries).
+// ---------------------------------------------------------------------------
+const _stringPool = new Map<string, string>()
+
+function intern(s: string): string {
+  const hit = _stringPool.get(s)
+  if (hit !== undefined) return hit
+  _stringPool.set(s, s)
+  return s
+}
 
 // ---------------------------------------------------------------------------
 // Tree traversal
@@ -98,7 +118,7 @@ function extractPropertiesBaseline(node: TextNode): TypographyProperties | null 
 }
 
 // ---------------------------------------------------------------------------
-// OPTIMISED extractor — single property access per field.
+// OPTIMISED extractor — single property access per field + string interning.
 // ---------------------------------------------------------------------------
 
 function extractProperties(node: TextNode): TypographyProperties | null {
@@ -145,8 +165,10 @@ function extractProperties(node: TextNode): TypographyProperties | null {
       : (rawTD as TextDecoration)
 
     return {
-      fontFamily: fontName.family,
-      fontStyle: fontName.style,
+      // intern() deduplicates repeated string values across nodes.
+      // All nodes using "Inter Regular" share the same two string objects.
+      fontFamily: intern(fontName.family),
+      fontStyle:  intern(fontName.style),
       fontWeight: styleToWeight(fontName.style),
       fontSize: Math.round(fontSize * 100) / 100,
       lineHeight,
@@ -163,10 +185,6 @@ function extractProperties(node: TextNode): TypographyProperties | null {
 // Public scanner
 // ---------------------------------------------------------------------------
 
-// Page info resolved during traversal for 'file' scope.
-// Keyed by node.id — populated once during collection, read in O(1)
-// during extraction. Replaces the former findPageForNode() which called
-// page.findOne() per text node, producing O(N²) behaviour.
 type PageInfo = { pageId: string; pageName: string }
 
 export async function scanTypography(
@@ -179,9 +197,6 @@ export async function scanTypography(
   const tTraversalStart = Date.now()
 
   const textNodes: TextNode[] = []
-
-  // Built during file-scope traversal; empty for selection/page scope.
-  // Avoids calling page.findOne() per node during extraction.
   const nodeToPage = new Map<string, PageInfo>()
 
   if (scope === 'selection') {
@@ -199,7 +214,6 @@ export async function scanTypography(
   } else if (scope === 'page') {
     findTextNodes(figma.currentPage, textNodes)
   } else {
-    // file scope: load all pages, then tag each collected node with its page.
     await figma.loadAllPagesAsync()
     for (const page of figma.root.children) {
       onProgress?.({
@@ -209,13 +223,11 @@ export async function scanTypography(
         label: `Loading page "${page.name}"…`,
       })
 
-      // Record the index before collection so we know which nodes are new.
       const countBefore = textNodes.length
       findTextNodes(page, textNodes)
 
-      // Tag every newly collected node with this page's info in O(1).
-      // This single pass replaces the former O(N²) findPageForNode() search.
-      const pageInfo: PageInfo = { pageId: page.id, pageName: page.name }
+      // Intern the page name once per page rather than once per node.
+      const pageInfo: PageInfo = { pageId: page.id, pageName: intern(page.name) }
       for (let i = countBefore; i < textNodes.length; i++) {
         nodeToPage.set(textNodes[i].id, pageInfo)
       }
@@ -249,8 +261,10 @@ export async function scanTypography(
 
   const total = textNodes.length
   const items: AuditItem<TypographyProperties>[] = []
-  const currentPageId = figma.currentPage.id
-  const currentPageName = figma.currentPage.name
+
+  // Intern the current page name once for selection/page scope.
+  const currentPageId   = figma.currentPage.id
+  const currentPageName = intern(figma.currentPage.name)
 
   for (let i = 0; i < textNodes.length; i++) {
     if (i % 200 === 0) {
@@ -262,7 +276,6 @@ export async function scanTypography(
     const props = extractProperties(node)
     if (!props) continue
 
-    // O(1) map lookup — replaces two O(N²) findPageForNode() calls.
     const { pageId, pageName } =
       scope === 'file'
         ? (nodeToPage.get(node.id) ?? { pageId: currentPageId, pageName: currentPageName })
@@ -270,7 +283,8 @@ export async function scanTypography(
 
     let parentName: string | undefined
     if (node.parent && node.parent.type !== 'PAGE') {
-      parentName = node.parent.name
+      // intern() ensures all nodes inside the same parent share one string object.
+      parentName = intern(node.parent.name)
     }
 
     items.push({
@@ -285,6 +299,10 @@ export async function scanTypography(
   }
 
   _scanTimings.extractionMs = Date.now() - tExtractionStart
+
+  // Release TextNode proxy references so GC can reclaim them before
+  // the grouping phase creates its own memory pressure.
+  textNodes.length = 0
 
   onProgress?.({ current: total, total, phase: 'grouping', label: 'Grouping results…' })
 
