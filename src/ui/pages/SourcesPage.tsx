@@ -1,84 +1,120 @@
 import { useMemo } from 'react'
-import { Layers, Search } from 'lucide-react'
+import { Layers } from 'lucide-react'
 import { Button } from '../components/ui/Button'
 import { EmptyState } from '../components/ui/EmptyState'
 import { InfoButton } from '../components/ui/InfoButton'
 import { DEFINITIONS } from '../lib/definitions'
 import { useUIStore } from '../store/ui'
 import { useAuditStore } from '../store/audit'
+import type { SourceType } from '../../shared/types'
 
 // ---------------------------------------------------------------------------
-// Source type values — shared across the platform
+// Source display configuration
 // ---------------------------------------------------------------------------
-export type SourceType =
-  | 'Raw Values'
-  | 'Local Text Style'
-  | 'Library Text Style'
-  | 'Variable'
-  | 'Unknown'
 
-// Colour mapping for source badges
-const SOURCE_STYLE: Record<SourceType, string> = {
-  'Raw Values':          'bg-surface-hover text-ink-2',
-  'Local Text Style':    'bg-accent-subtle text-accent',
-  'Library Text Style':  'bg-success-subtle text-success',
-  'Variable':            'bg-warning-subtle text-warning',
+const SOURCE_ORDER: SourceType[] = [
+  'Raw Values',
+  'Local Text Style',
+  'Library Text Style',
+  'Variable',
+  'Unknown',
+]
+
+const SOURCE_BADGE: Record<SourceType, string> = {
+  'Raw Values':          'bg-surface-active text-ink-2 border border-border',
+  'Local Text Style':    'bg-accent-subtle text-accent border border-accent/20',
+  'Library Text Style':  'bg-success-subtle text-success border border-success/20',
+  'Variable':            'bg-warning-subtle text-warning border border-warning/20',
   'Unknown':             'bg-surface-0 text-ink-disabled border border-border-subtle',
+}
+
+const SOURCE_DESC: Record<SourceType, string> = {
+  'Raw Values':          'Defined directly on the layer, not using a text style.',
+  'Local Text Style':    'Uses a text style defined in this file.',
+  'Library Text Style':  'Uses a text style from a shared library.',
+  'Variable':            'Typography values bound to a variable.',
+  'Unknown':             'Source could not be determined.',
 }
 
 function SourceBadge({ source }: { source: SourceType }) {
   return (
-    <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${
-      SOURCE_STYLE[source]
-    }`}>
+    <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${SOURCE_BADGE[source]}`}>
       {source}
     </span>
   )
 }
 
-interface SourceGroup {
+interface SourceRow {
   source: SourceType
-  signatureCount: number
-  layerCount: number
+  signatures: number
+  layers: number
+}
+
+// ---------------------------------------------------------------------------
+// Health observation
+// ---------------------------------------------------------------------------
+
+interface Observation {
+  level: 'info' | 'warning'
+  message: string
+}
+
+function ObservationBadge({ obs }: { obs: Observation }) {
+  const cls = obs.level === 'warning'
+    ? 'bg-warning-subtle border-warning/20 text-warning'
+    : 'bg-surface-0 border-border text-ink-3'
+  return (
+    <div className={`flex items-start gap-2 px-3 py-2 rounded border text-xs leading-relaxed ${cls}`}>
+      <span className="shrink-0 mt-0.5">{obs.level === 'warning' ? '⚠️' : 'ℹ️'}</span>
+      <span>{obs.message}</span>
+    </div>
+  )
 }
 
 export function SourcesPage() {
   const { navigate } = useUIStore()
   const { result } = useAuditStore()
 
-  // ---------------------------------------------------------------------------
-  // Source classification
-  // ---------------------------------------------------------------------------
-  // Currently all signatures are classified as Unknown because textStyleId
-  // is not collected during the scan. Sprint 2 will add this field to enable
-  // proper classification into Raw Values / Local / Library / Variable.
-  //
-  // Rule: Never infer. If source cannot be determined confidently: Unknown.
-  // ---------------------------------------------------------------------------
-  const sourceGroups = useMemo<SourceGroup[]>(() => {
-    if (!result) return []
+  const { rows, observations } = useMemo(() => {
+    if (!result) return { rows: [], observations: [] }
 
-    // Group audit groups by their source classification.
-    // In Sprint 1: all signatures are Unknown.
+    // Aggregate groups by source
     const bySource = new Map<SourceType, { signatures: number; layers: number }>()
-
     for (const group of result.groups) {
-      // TODO Sprint 2: derive source from group.descriptor.textStyleId
-      const source: SourceType = 'Unknown'
-      const existing = bySource.get(source) ?? { signatures: 0, layers: 0 }
-      bySource.set(source, {
-        signatures: existing.signatures + 1,
-        layers: existing.layers + group.count,
-      })
+      const src: SourceType = (group.source as SourceType) ?? 'Unknown'
+      const existing = bySource.get(src) ?? { signatures: 0, layers: 0 }
+      bySource.set(src, { signatures: existing.signatures + 1, layers: existing.layers + group.count })
     }
 
-    return Array.from(bySource.entries())
-      .map(([source, data]) => ({
-        source,
-        signatureCount: data.signatures,
-        layerCount: data.layers,
-      }))
-      .sort((a, b) => b.layerCount - a.layerCount)
+    const rows: SourceRow[] = SOURCE_ORDER
+      .filter((s) => bySource.has(s))
+      .map((source) => {
+        const d = bySource.get(source)!
+        return { source, signatures: d.signatures, layers: d.layers }
+      })
+
+    // Health observations — passive, no recommendations
+    const obs: Observation[] = []
+    const rawRow = bySource.get('Raw Values')
+    if (rawRow) {
+      const rawPct = rawRow.layers / result.totalItems
+      if (rawPct > 0.5) {
+        obs.push({ level: 'warning', message: `${Math.round(rawPct * 100)}% of text layers use raw values rather than a named text style.` })
+      } else if (rawPct > 0.2) {
+        obs.push({ level: 'info', message: `${Math.round(rawPct * 100)}% of text layers use raw values.` })
+      }
+    }
+
+    const activeSources = [...bySource.keys()].filter(s => s !== 'Unknown')
+    if (activeSources.length > 1) {
+      obs.push({ level: 'info', message: `Multiple typography sources detected: ${activeSources.join(', ')}.` })
+    }
+
+    if (result.groups.length > 200) {
+      obs.push({ level: 'warning', message: `${result.groups.length.toLocaleString()} unique Typography Signatures detected. Consider standardising toward fewer signatures.` })
+    }
+
+    return { rows, observations: obs }
   }, [result])
 
   if (!result) {
@@ -87,7 +123,7 @@ export function SourcesPage() {
         <EmptyState
           icon={Layers}
           title="No scan data"
-          description="Run a scan first to see source classification."
+          description="Run a scan to see source classification."
           action={<Button variant="primary" size="sm" onClick={() => navigate('scan')}>Run Scan</Button>}
         />
       </div>
@@ -107,47 +143,52 @@ export function SourcesPage() {
         </p>
       </div>
 
-      {/* Source breakdown table */}
       <div className="flex-1 overflow-y-auto">
+        {/* Observations */}
+        {observations.length > 0 && (
+          <div className="px-4 py-3 border-b border-border-subtle space-y-2">
+            <p className="text-2xs font-semibold text-ink-disabled uppercase tracking-widest mb-2">Observations</p>
+            {observations.map((obs, i) => <ObservationBadge key={i} obs={obs} />)}
+          </div>
+        )}
+
         {/* Column headers */}
-        <div className="grid px-5 py-2 bg-surface-0 border-b border-border text-2xs font-semibold text-ink-3 uppercase tracking-wider"
-          style={{ gridTemplateColumns: '1fr 120px 120px' }}
+        <div
+          className="grid px-4 py-2 bg-surface-0 border-b border-border text-2xs font-semibold text-ink-3 uppercase tracking-wider"
+          style={{ gridTemplateColumns: '1fr 100px 120px' }}
         >
           <span>Source</span>
           <span className="text-right">Signatures</span>
           <span className="text-right">Layers</span>
         </div>
 
-        {sourceGroups.map((sg) => (
+        {rows.map((row) => (
           <div
-            key={sg.source}
-            className="grid items-center px-5 py-3 border-b border-border-subtle hover:bg-surface-hover transition-colors"
-            style={{ gridTemplateColumns: '1fr 120px 120px' }}
+            key={row.source}
+            className="grid items-center px-4 py-3 border-b border-border-subtle"
+            style={{ gridTemplateColumns: '1fr 100px 120px' }}
           >
-            <SourceBadge source={sg.source} />
-            <span className="text-sm tabular-nums text-ink-2 text-right">
-              {sg.signatureCount.toLocaleString()}
-            </span>
-            <span className="text-sm tabular-nums text-ink text-right font-medium">
-              {sg.layerCount.toLocaleString()}
-            </span>
+            <div>
+              <SourceBadge source={row.source} />
+              <p className="text-xs text-ink-disabled mt-1 leading-relaxed">
+                {SOURCE_DESC[row.source]}
+              </p>
+            </div>
+            <span className="text-sm tabular-nums text-ink-2 text-right">{row.signatures.toLocaleString()}</span>
+            <span className="text-sm tabular-nums text-ink font-medium text-right">{row.layers.toLocaleString()}</span>
           </div>
         ))}
 
-        {/* Sprint 2 note */}
-        <div className="px-5 py-4 bg-surface-0 border-t border-border-subtle mt-2">
-          <p className="text-xs font-medium text-ink-2 mb-1">About Source Classification</p>
-          <p className="text-xs text-ink-3 leading-relaxed">
-            Accurate classification (Raw Values, Local Style, Library Style, Variable)
-            requires enhanced scan data planned for Sprint 2. All signatures currently
-            show as <span className="font-medium">Unknown</span> because the source cannot
-            be determined with confidence from the current scan.
-          </p>
-          <p className="text-xs text-ink-disabled mt-2">
-            Refactor never infers source. If it cannot be determined confidently,
-            it is shown as Unknown.
-          </p>
-        </div>
+        {/* Variable note */}
+        {!rows.find(r => r.source === 'Variable') && (
+          <div className="px-4 py-3 bg-surface-0">
+            <p className="text-xs text-ink-disabled leading-relaxed">
+              <span className="font-medium">Variable</span> classification requires
+              <code className="mx-1 px-1 bg-surface-active rounded text-2xs">boundVariables</code>
+              inspection, planned for Sprint 3.
+            </p>
+          </div>
+        )}
       </div>
     </div>
   )

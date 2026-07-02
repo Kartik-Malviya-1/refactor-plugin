@@ -23,44 +23,26 @@ const PROGRESS_THROTTLE_MS = 150
 
 // ---------------------------------------------------------------------------
 // Instrumentation
-//
-// Counters and timers for the traversal and extraction phases.
-// Reset automatically at the start of every traverseAndExtract() call.
-// Read by main.ts after the scan to print the detailed report.
 // ---------------------------------------------------------------------------
 
 export interface TraversalInstrument {
-  // Stage 1: Document traversal
   traversalMs: number
-  nodesVisited: number       // all DFS nodes popped (frames + groups + text + etc.)
-  nodesMatched: number       // nodes for which adapter.accepts() returned true
-
-  // Stage 2: Page lookup (Map.get per node)
+  nodesVisited: number
+  nodesMatched: number
   pageLookupMs: number
   pageLookupCount: number
-
-  // Stage 3: Text extraction (total time inside adapter.extract() per node)
   extractionCallMs: number
-  itemsExtracted: number     // non-null results returned by adapter.extract()
-
-  // Parent access (node.parent IPC call + .type check + .name access)
+  itemsExtracted: number
   parentAccessMs: number
   parentAccessCount: number
-
-  // Progress updates
   progressUpdateCount: number
 }
 
 export const _traversalInstrument: TraversalInstrument = {
-  traversalMs: 0,
-  nodesVisited: 0,
-  nodesMatched: 0,
-  pageLookupMs: 0,
-  pageLookupCount: 0,
-  extractionCallMs: 0,
-  itemsExtracted: 0,
-  parentAccessMs: 0,
-  parentAccessCount: 0,
+  traversalMs: 0, nodesVisited: 0, nodesMatched: 0,
+  pageLookupMs: 0, pageLookupCount: 0,
+  extractionCallMs: 0, itemsExtracted: 0,
+  parentAccessMs: 0, parentAccessCount: 0,
   progressUpdateCount: 0,
 }
 
@@ -93,18 +75,16 @@ async function collectNodesIterative<TNode extends BaseNode>(
   while (stack.length > 0) {
     const node = stack.pop()!
     visited++
-    _traversalInstrument.nodesVisited++   // instrument: total DFS nodes
+    _traversalInstrument.nodesVisited++
 
     if (accepts(node)) {
       results.push(node)
-      _traversalInstrument.nodesMatched++ // instrument: matched nodes
+      _traversalInstrument.nodesMatched++
     }
 
     if ('children' in node) {
       const children = (node as ChildrenMixin).children
-      for (let i = children.length - 1; i >= 0; i--) {
-        stack.push(children[i])
-      }
+      for (let i = children.length - 1; i >= 0; i--) stack.push(children[i])
     }
 
     if (visited % TRAVERSAL_CHUNK === 0) {
@@ -112,7 +92,6 @@ async function collectNodesIterative<TNode extends BaseNode>(
       if (isCancelled()) return true
     }
   }
-
   return false
 }
 
@@ -140,97 +119,59 @@ export async function traverseAndExtract<TNode extends BaseNode, TProperties>(
   isCancelled: () => boolean,
   onProgress?: (p: ScanProgress) => void
 ): Promise<TraversalResult<TProperties>> {
-  // Reset all traversal instrumentation for this scan.
   resetTraversalInstrument()
 
   function sendProgress(p: ScanProgress): void {
     onProgress?.(p)
-    _traversalInstrument.progressUpdateCount++  // instrument
+    _traversalInstrument.progressUpdateCount++
   }
 
   const empty = (traversalMs: number): TraversalResult<TProperties> => ({
-    items: [],
-    traversalMs,
-    extractionMs: 0,
-    nodeCount: 0,
+    items: [], traversalMs, extractionMs: 0, nodeCount: 0,
     progressEventCount: _traversalInstrument.progressUpdateCount,
   })
 
   sendProgress({ current: 0, total: 0, phase: 'collecting', label: 'Collecting layers…' })
 
-  // ── Stage 1: Document traversal ──────────────────────────────────
   const tTraversalStart = Date.now()
-
   const matchedNodes: TNode[] = []
   const nodeToPage = new Map<string, PageInfo>()
 
   if (scope === 'selection') {
     const sel = figma.currentPage.selection
-    if (sel.length === 0) {
-      _traversalInstrument.traversalMs = Date.now() - tTraversalStart
-      return empty(_traversalInstrument.traversalMs)
-    }
+    if (sel.length === 0) { _traversalInstrument.traversalMs = Date.now() - tTraversalStart; return empty(_traversalInstrument.traversalMs) }
     for (const node of sel) {
-      const cancelled = await collectNodesIterative(node, adapter.accepts, matchedNodes, isCancelled)
-      if (cancelled) {
-        _traversalInstrument.traversalMs = Date.now() - tTraversalStart
-        return empty(_traversalInstrument.traversalMs)
-      }
+      if (await collectNodesIterative(node, adapter.accepts, matchedNodes, isCancelled)) { _traversalInstrument.traversalMs = Date.now() - tTraversalStart; return empty(_traversalInstrument.traversalMs) }
     }
   } else if (scope === 'page') {
-    const cancelled = await collectNodesIterative(
-      figma.currentPage, adapter.accepts, matchedNodes, isCancelled
-    )
-    if (cancelled) {
-      _traversalInstrument.traversalMs = Date.now() - tTraversalStart
-      return empty(_traversalInstrument.traversalMs)
-    }
+    if (await collectNodesIterative(figma.currentPage, adapter.accepts, matchedNodes, isCancelled)) { _traversalInstrument.traversalMs = Date.now() - tTraversalStart; return empty(_traversalInstrument.traversalMs) }
   } else {
     await figma.loadAllPagesAsync()
     for (const page of figma.root.children) {
-      if (isCancelled()) {
-        _traversalInstrument.traversalMs = Date.now() - tTraversalStart
-        return empty(_traversalInstrument.traversalMs)
-      }
+      if (isCancelled()) { _traversalInstrument.traversalMs = Date.now() - tTraversalStart; return empty(_traversalInstrument.traversalMs) }
       sendProgress({ current: 0, total: 0, phase: 'collecting', label: `Traversing page "${page.name}"…` })
       const countBefore = matchedNodes.length
-      const cancelled = await collectNodesIterative(page, adapter.accepts, matchedNodes, isCancelled)
-      if (cancelled) {
-        _traversalInstrument.traversalMs = Date.now() - tTraversalStart
-        return empty(_traversalInstrument.traversalMs)
-      }
+      if (await collectNodesIterative(page, adapter.accepts, matchedNodes, isCancelled)) { _traversalInstrument.traversalMs = Date.now() - tTraversalStart; return empty(_traversalInstrument.traversalMs) }
       const pageInfo: PageInfo = { pageId: page.id, pageName: intern(page.name) }
-      for (let i = countBefore; i < matchedNodes.length; i++) {
-        nodeToPage.set(matchedNodes[i].id, pageInfo)
-      }
+      for (let i = countBefore; i < matchedNodes.length; i++) nodeToPage.set(matchedNodes[i].id, pageInfo)
     }
   }
 
   _traversalInstrument.traversalMs = Date.now() - tTraversalStart
   const nodeCount = matchedNodes.length
 
-  // ── Stages 2–3: Extraction loop ────────────────────────────────────
   const tExtractionStart = Date.now()
-
   const total = matchedNodes.length
   const items: AuditItem<TProperties>[] = []
-
   const currentPageId   = figma.currentPage.id
   const currentPageName = intern(figma.currentPage.name)
-
   let lastProgressAt = Date.now()
 
   for (let i = 0; i < matchedNodes.length; i++) {
     if (i % YIELD_EVERY === 0) {
       await new Promise<void>((r) => setTimeout(r, 0))
       if (isCancelled()) {
-        return {
-          items: [],
-          traversalMs: _traversalInstrument.traversalMs,
-          extractionMs: Date.now() - tExtractionStart,
-          nodeCount,
-          progressEventCount: _traversalInstrument.progressUpdateCount,
-        }
+        return { items: [], traversalMs: _traversalInstrument.traversalMs, extractionMs: Date.now() - tExtractionStart, nodeCount, progressEventCount: _traversalInstrument.progressUpdateCount }
       }
       const now = Date.now()
       if (now - lastProgressAt >= PROGRESS_THROTTLE_MS) {
@@ -241,7 +182,6 @@ export async function traverseAndExtract<TNode extends BaseNode, TProperties>(
 
     const node = matchedNodes[i]
 
-    // ── Stage 3: Text extraction (time inside adapter.extract) ─────────
     const _tExtract = Date.now()
     const props = adapter.extract(node)
     _traversalInstrument.extractionCallMs += Date.now() - _tExtract
@@ -249,7 +189,6 @@ export async function traverseAndExtract<TNode extends BaseNode, TProperties>(
     if (!props) continue
     _traversalInstrument.itemsExtracted++
 
-    // ── Stage 2: Page lookup (Map.get — O(1)) ─────────────────────
     const _tPage = Date.now()
     const { pageId, pageName } =
       scope === 'file'
@@ -258,12 +197,28 @@ export async function traverseAndExtract<TNode extends BaseNode, TProperties>(
     _traversalInstrument.pageLookupMs += Date.now() - _tPage
     _traversalInstrument.pageLookupCount++
 
-    // ── Parent access (node.parent IPC call) ───────────────────────
+    // ── Parent access ───────────────────────────────────────────────────
+    // Sprint 2: parentType is derived from nodeParent.type which was
+    // already being accessed in the PAGE check — zero additional IPC cost.
+    // hasAutoLayoutParent is only checked for layout-capable containers
+    // (FRAME/COMPONENT/COMPONENT_SET) to minimise conditional IPC calls.
     const _tParent = Date.now()
-    const nodeParent = node.parent   // IPC call: crosses sandbox boundary
+    const nodeParent = node.parent   // IPC call
     let parentName: string | undefined
-    if (nodeParent && nodeParent.type !== 'PAGE') {
-      parentName = intern(nodeParent.name)
+    let parentType: string | undefined
+    let hasAutoLayoutParent = false
+
+    if (nodeParent) {
+      const pType = nodeParent.type  // IPC call (same as former PAGE check)
+      if (pType !== 'PAGE') {
+        parentType = pType as string
+        parentName = intern(nodeParent.name)  // IPC call
+        // Conditional auto-layout check — only for containers that support it.
+        if (pType === 'FRAME' || pType === 'COMPONENT' || pType === 'COMPONENT_SET') {
+          const lm = (nodeParent as BaseNode & { layoutMode?: string }).layoutMode
+          hasAutoLayoutParent = lm !== undefined && lm !== 'NONE'
+        }
+      }
     }
     _traversalInstrument.parentAccessMs += Date.now() - _tParent
     _traversalInstrument.parentAccessCount++
@@ -275,20 +230,15 @@ export async function traverseAndExtract<TNode extends BaseNode, TProperties>(
       pageId,
       pageName,
       parentName,
+      parentType,
+      hasAutoLayoutParent,
       properties: props,
     })
   }
 
   sendProgress({ current: total, total, phase: 'grouping', label: 'Grouping results…' })
-
   const extractionMs = Date.now() - tExtractionStart
   matchedNodes.length = 0
 
-  return {
-    items,
-    traversalMs: _traversalInstrument.traversalMs,
-    extractionMs,
-    nodeCount,
-    progressEventCount: _traversalInstrument.progressUpdateCount,
-  }
+  return { items, traversalMs: _traversalInstrument.traversalMs, extractionMs, nodeCount, progressEventCount: _traversalInstrument.progressUpdateCount }
 }

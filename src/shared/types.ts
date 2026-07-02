@@ -1,7 +1,5 @@
 // ─────────────────────────────────────────────────────────────
 // Core Engine Types
-// The engine knows nothing about any specific module (typography,
-// colors, spacing, etc.). Every module conforms to these contracts.
 // ─────────────────────────────────────────────────────────────
 
 export type ScanScope = 'selection' | 'page' | 'file'
@@ -13,6 +11,18 @@ export interface ScanProgress {
   label?: string
 }
 
+/**
+ * Sprint 2: Source classification for Typography Signatures.
+ * Shared type used in both the plugin backend (classification) and
+ * the UI (display). Never infer — Unknown is the correct fallback.
+ */
+export type SourceType =
+  | 'Raw Values'
+  | 'Local Text Style'
+  | 'Library Text Style'
+  | 'Variable'
+  | 'Unknown'
+
 /** A single design element found during a scan. TProperties is module-specific. */
 export interface AuditItem<TProperties = Record<string, unknown>> {
   id: string
@@ -21,6 +31,13 @@ export interface AuditItem<TProperties = Record<string, unknown>> {
   pageId: string
   pageName: string
   parentName?: string
+
+  // Sprint 2: structural enrichment — populated by traversal engine.
+  // parentType: immediate parent node type (FRAME, COMPONENT, INSTANCE, etc.)
+  // hasAutoLayoutParent: true if the parent is a layout-mode container.
+  parentType?: string
+  hasAutoLayoutParent?: boolean
+
   properties: TProperties
 }
 
@@ -32,6 +49,8 @@ export interface AuditGroup<TProperties = Record<string, unknown>> {
   count: number
   items: AuditItem<TProperties>[]
   descriptor: TProperties
+  // Sprint 2: source classification — set by plugin backend after grouping.
+  source?: SourceType
 }
 
 /** The complete result of a scan. Fully JSON-serializable for postMessage. */
