@@ -1,11 +1,18 @@
-import { registerModule, getModule } from '../engine/registry'
+import { registerModule, registerAdapter, getAdapter } from '../engine/registry'
+import { scanEngine } from '../engine/core'
 import { typographyModule } from '../modules/typography/index'
-import { _scanTimings } from '../modules/typography/scanner'
-import { _groupTimings } from '../modules/typography/index'
+import { typographyScannerAdapter } from '../modules/typography/adapter'
 import type { UIToPluginMessage, PluginToUIMessage } from '../shared/messages'
 import type { AuditResult } from '../shared/types'
 
+// ---------------------------------------------------------------------------
+// Module + Adapter registration
+// Every new module requires two registrations:
+//   registerModule()  — metadata + AuditModule interface (UI catalog)
+//   registerAdapter() — ScannerAdapter for the Core Scan Engine
+// ---------------------------------------------------------------------------
 registerModule(typographyModule)
+registerAdapter(typographyScannerAdapter)
 
 figma.showUI(__html__, {
   width: 860,
@@ -57,26 +64,8 @@ function printScanProfile(stages: ProfileStage[], totalMs: number): void {
   console.log(divider)
   console.log(row('Total', totalMs))
   console.log('  └' + '─'.repeat(NAME_COL + VAL_COL + 13) + '┘')
-  console.log(`  Nodes scanned: ${_scanTimings.nodeCount}`)
-
-  if (_scanTimings.benchSampleSize > 0) {
-    const n         = _scanTimings.nodeCount
-    const oldEstMs  = Math.round(_scanTimings.benchBaselineMsPerNode * n)
-    const newActMs  = _scanTimings.extractionMs
-    const pctBetter = oldEstMs > 0
-      ? Math.round((1 - newActMs / oldEstMs) * 100)
-      : 0
-
-    const sampleNote = `(${_scanTimings.benchSampleSize}-node sample × ${n} nodes)`
-
-    console.log('')
-    console.log('  ┌─ Extraction optimisation: before → after ─────────┐')
-    console.log(`  │  Before (double-access)  ${fmtMs(oldEstMs).padStart(8)}  estimated ${sampleNote}`)
-    console.log(`  │  After  (cached access)  ${fmtMs(newActMs).padStart(8)}  measured`)
-    console.log(`  │  Improvement             ~${pctBetter}% faster`)
-    console.log('  └' + '─'.repeat(NAME_COL + VAL_COL + 30) + '┘')
-  }
-
+  console.log(`  Nodes scanned:   ${scanEngine.timings.nodeCount}`)
+  console.log(`  Progress events: ${scanEngine.timings.progressEventCount}`)
   console.log('')
 }
 
@@ -112,10 +101,12 @@ figma.ui.onmessage = async (rawMsg: unknown) => {
 
     case 'START_SCAN': {
       const { moduleId, scope } = msg.payload
-      const module = getModule(moduleId)
 
-      if (!module) {
-        send({ type: 'SCAN_ERROR', payload: { error: `Module "${moduleId}" is not registered.` } })
+      // Look up the adapter for this module.
+      // The engine only accepts adapters — never AuditModule directly.
+      const adapter = getAdapter(moduleId)
+      if (!adapter) {
+        send({ type: 'SCAN_ERROR', payload: { error: `No adapter registered for module "${moduleId}".` } })
         return
       }
 
@@ -125,19 +116,23 @@ figma.ui.onmessage = async (rawMsg: unknown) => {
       send({ type: 'SCAN_STARTED', payload: { moduleId, scope } })
 
       try {
-        // ── Stage: Scan (traversal + extraction) ──────────────────────────
-        const items = await module.scan(scope, (progress) => {
-          if (scanCancelled) return
-          send({ type: 'SCAN_PROGRESS', payload: progress })
-        })
+        // The Core Scan Engine owns traversal, extraction, progress,
+        // cancellation, and grouping. main.ts passes the adapter and
+        // cancellation signal; the engine does the rest.
+        const { items, groups } = await scanEngine.run(
+          adapter,
+          scope,
+          () => scanCancelled,
+          (progress) => {
+            if (scanCancelled) return
+            send({ type: 'SCAN_PROGRESS', payload: progress })
+          }
+        )
 
         if (scanCancelled) {
           send({ type: 'SCAN_CANCELLED' })
           return
         }
-
-        // ── Stage: Group (normalization + sorting) ────────────────────────
-        const groups = module.group(items)
 
         const scopeLabel =
           scope === 'selection'
@@ -146,12 +141,7 @@ figma.ui.onmessage = async (rawMsg: unknown) => {
               ? figma.currentPage.name
               : 'Entire File'
 
-        // ── Stage: Construction ───────────────────────────────────────────
-        // Measure only the cost of assembling the AuditResult object.
-        // Previously this stage ran void JSON.stringify(result) to measure
-        // serialisation cost, which caused the entire result to be serialised
-        // twice — once here and once inside postMessage's structured clone.
-        // Removed. msgMs below now captures the real structured-clone cost.
+        // ── Stage: Construction ──────────────────────────────────────────
         const tSerial = Date.now()
         const result: AuditResult = {
           moduleId,
@@ -164,19 +154,22 @@ figma.ui.onmessage = async (rawMsg: unknown) => {
         }
         const serialMs = Date.now() - tSerial
 
-        // ── Stage: Messaging (includes structured-clone cost) ─────────────
+        // ── Stage: Messaging ──────────────────────────────────────────────
         const tMsg = Date.now()
         send({ type: 'SCAN_COMPLETE', payload: result })
         const msgMs = Date.now() - tMsg
 
         const totalMs = Date.now() - tTotal
 
+        // Read timing data from the engine (traversal + extraction +
+        // grouping + sorting all measured internally by the engine).
+        const t = scanEngine.timings
         printScanProfile(
           [
-            { name: 'Traversal',     ms: _scanTimings.traversalMs },
-            { name: 'Extraction',    ms: _scanTimings.extractionMs },
-            { name: 'Normalization', ms: _groupTimings.normalizationMs },
-            { name: 'Sorting',       ms: _groupTimings.sortingMs },
+            { name: 'Traversal',     ms: t.traversalMs },
+            { name: 'Extraction',    ms: t.extractionMs },
+            { name: 'Normalization', ms: t.groupingMs },
+            { name: 'Sorting',       ms: t.sortingMs },
             { name: 'Construction',  ms: serialMs },
             { name: 'Messaging',     ms: msgMs },
           ],

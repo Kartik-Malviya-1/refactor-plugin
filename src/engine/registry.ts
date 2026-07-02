@@ -1,10 +1,10 @@
 import type { AuditModule, ModuleRegistration } from '../shared/types'
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+import type { ScannerAdapter } from './types'
 
-// ─────────────────────────────────────────────────────────────
+// ---------------------------------------------------------------------------
 // Module Registry
-// The engine is completely decoupled from modules. Modules
-// register themselves; the engine discovers them here.
-// ─────────────────────────────────────────────────────────────
+// ---------------------------------------------------------------------------
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const modules = new Map<string, AuditModule<any>>()
@@ -23,7 +23,32 @@ export function getAllModuleIds(): string[] {
   return Array.from(modules.keys())
 }
 
-/** Static registrations for future/upcoming modules (UI only — no scanner). */
+// ---------------------------------------------------------------------------
+// Adapter Registry
+//
+// Separates from the module registry so the engine can look up adapters
+// without knowing about AuditModule at all.
+// Future modules register both a module (for metadata + UI catalog)
+// and an adapter (for the scan engine).
+// ---------------------------------------------------------------------------
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const adapters = new Map<string, ScannerAdapter<BaseNode, any>>()
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export function registerAdapter(adapter: ScannerAdapter<any, any>): void {
+  adapters.set(adapter.moduleId, adapter)
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export function getAdapter(moduleId: string): ScannerAdapter<BaseNode, any> | undefined {
+  return adapters.get(moduleId)
+}
+
+// ---------------------------------------------------------------------------
+// Module Catalog (static — used by UI for sidebar navigation)
+// ---------------------------------------------------------------------------
+
 export const MODULE_CATALOG: ModuleRegistration[] = [
   {
     id: 'typography',

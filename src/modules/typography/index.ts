@@ -1,11 +1,13 @@
 import type { AuditGroup, AuditItem, AuditModule, ScanProgress, ScanScope } from '../../shared/types'
 import type { TypographyProperties } from './types'
-import { normalizeTypography } from './normalizer'
-import { scanTypography } from './scanner'
+import { normalizeTypography, normalizeTypographyProps } from './normalizer'
+import { scanEngine } from '../../engine/core'
+import { typographyScannerAdapter } from './adapter'
 
 // ---------------------------------------------------------------------------
-// Profiling data — populated during every group() call.
-// Read by src/plugin/main.ts after the call returns to build the report.
+// Profiling data for the grouping phase.
+// Still exported so existing imports in tests or tooling continue to work.
+// After the engine refactor, main.ts reads scanEngine.timings instead.
 // ---------------------------------------------------------------------------
 export const _groupTimings = {
   normalizationMs: 0,
@@ -13,7 +15,7 @@ export const _groupTimings = {
 }
 
 // ---------------------------------------------------------------------------
-// Internals
+// Internals (sync grouping — kept for AuditModule.group() compatibility)
 // ---------------------------------------------------------------------------
 
 function hashKey(key: string): string {
@@ -27,7 +29,13 @@ function hashKey(key: string): string {
 }
 
 // ---------------------------------------------------------------------------
-// Typography Module — reference AuditModule implementation
+// Typography Module
+//
+// Implements AuditModule<TypographyProperties> for the module registry
+// and UI catalog. scan() and group() now delegate to the Core Scan Engine
+// via TypographyScannerAdapter.
+//
+// AuditModule interface is unchanged — backwards compatible.
 // ---------------------------------------------------------------------------
 
 export const typographyModule: AuditModule<TypographyProperties> = {
@@ -40,7 +48,15 @@ export const typographyModule: AuditModule<TypographyProperties> = {
     scope: ScanScope,
     onProgress?: (p: ScanProgress) => void
   ): Promise<AuditItem<TypographyProperties>[]> {
-    return scanTypography(scope, onProgress)
+    // Delegate to the engine. isCancelled is a no-op here because
+    // cancellation is managed by the engine runner in main.ts.
+    const { items } = await scanEngine.run(
+      typographyScannerAdapter,
+      scope,
+      () => false,
+      onProgress
+    )
+    return items
   },
 
   normalize(item: AuditItem<TypographyProperties>): string {
@@ -51,15 +67,16 @@ export const typographyModule: AuditModule<TypographyProperties> = {
     return `${descriptor.fontFamily} ${descriptor.fontStyle} / ${descriptor.fontSize}px`
   },
 
+  // Synchronous group() retained for AuditModule interface compatibility.
+  // main.ts no longer calls this — it uses scanEngine.run() which includes
+  // async grouping. This method exists so external callers of the module
+  // interface continue to work without modification.
   group(items: AuditItem<TypographyProperties>[]): AuditGroup<TypographyProperties>[] {
     const buckets = new Map<string, AuditItem<TypographyProperties>[]>()
 
-    // ── Stage: Normalization ───────────────────────────────────────────────
-    // Normalizes each item into a grouping key and distributes into buckets.
     const tNormStart = Date.now()
-
     for (const item of items) {
-      const key = this.normalize(item)
+      const key = normalizeTypographyProps(item.properties)
       const bucket = buckets.get(key)
       if (bucket) {
         bucket.push(item)
@@ -67,10 +84,8 @@ export const typographyModule: AuditModule<TypographyProperties> = {
         buckets.set(key, [item])
       }
     }
-
     _groupTimings.normalizationMs = Date.now() - tNormStart
 
-    // Build group objects from buckets (not timed separately — O(n) trivial)
     const groups: AuditGroup<TypographyProperties>[] = []
     for (const [key, bucket] of buckets) {
       const descriptor = bucket[0].properties
@@ -84,7 +99,6 @@ export const typographyModule: AuditModule<TypographyProperties> = {
       })
     }
 
-    // ── Stage: Sorting ─────────────────────────────────────────────────────
     const tSortStart = Date.now()
     groups.sort((a, b) => b.count - a.count)
     _groupTimings.sortingMs = Date.now() - tSortStart

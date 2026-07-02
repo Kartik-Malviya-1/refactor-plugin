@@ -15,12 +15,21 @@ function lsKey(ls: NormalizedLetterSpacing): string {
   return `${ls.unit}:${roundTo(ls.value, 2)}`
 }
 
-export function normalizeTypography(item: AuditItem<TypographyProperties>): string {
-  const p = item.properties
-  // Template literal avoids allocating a throwaway 7-element Array per call.
-  // normalizeTypography is called once per item in group(); at 500K items
-  // that is 500K Array objects eliminated from the GC workload.
+/**
+ * Canonical normalization taking TProperties directly.
+ * Used by TypographyScannerAdapter and the engine's grouper.
+ * Template literal avoids allocating a throwaway Array per call.
+ */
+export function normalizeTypographyProps(p: TypographyProperties): string {
   return `${p.fontFamily}|${p.fontStyle}|${roundTo(p.fontSize, 2)}|${lhKey(p.lineHeight)}|${lsKey(p.letterSpacing)}|${p.textCase}|${p.textDecoration}`
+}
+
+/**
+ * AuditModule.normalize() compatibility wrapper.
+ * The AuditModule interface passes AuditItem; we only need item.properties.
+ */
+export function normalizeTypography(item: AuditItem<TypographyProperties>): string {
+  return normalizeTypographyProps(item.properties)
 }
 
 export function styleToWeight(style: string): number {
