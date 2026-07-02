@@ -1,4 +1,4 @@
-import { useRef, useMemo, useCallback } from 'react'
+import { useRef, useMemo, useCallback, useEffect, memo } from 'react'
 import { useVirtualizer } from '@tanstack/react-virtual'
 import { ArrowUp, ArrowDown, ChevronsUpDown } from 'lucide-react'
 import type { AuditGroup } from '../../../shared/types'
@@ -25,8 +25,24 @@ const columns: { key: SortField | null; label: string }[] = [
   { key: null, label: '' },
 ]
 
+// Defined at module scope and memoised so it is never recreated.
+// Receives sortField and sortDirection as props instead of closing
+// over them, which would cause a new function instance every render.
+interface SortIconProps {
+  field: SortField
+  sortField: SortField
+  sortDirection: 'asc' | 'desc'
+}
+
+const SortIcon = memo(function SortIcon({ field, sortField, sortDirection }: SortIconProps) {
+  if (sortField !== field) return <ChevronsUpDown className="w-3 h-3 opacity-30" />
+  return sortDirection === 'asc'
+    ? <ArrowUp className="w-3 h-3 text-accent" />
+    : <ArrowDown className="w-3 h-3 text-accent" />
+})
+
 export function AuditTable({ groups }: AuditTableProps) {
-  const { selectedGroupId, expandedGroupIds, sortField, sortDirection, setSort, selectGroup, toggleGroupExpand } = useUIStore()
+  const { selectedGroupId, expandedGroupIds, sortField, sortDirection, setSort } = useUIStore()
 
   const sorted = useMemo(() => {
     return [...groups].sort((a, b) => {
@@ -49,22 +65,48 @@ export function AuditTable({ groups }: AuditTableProps) {
     [sortField, sortDirection, setSort]
   )
 
+  // Reads current state at call time via getState() so the callback
+  // needs zero dependencies and is reference-stable across all renders.
+  // This is what makes React.memo on GroupRow effective: the onSelect
+  // prop never changes, so unchanged rows never re-render.
+  const handleSelect = useCallback((groupId: string) => {
+    const { selectedGroupId: current, selectGroup } = useUIStore.getState()
+    selectGroup(current === groupId ? null : groupId)
+  }, [])
+
+  const handleToggleExpand = useCallback((groupId: string) => {
+    useUIStore.getState().toggleGroupExpand(groupId)
+  }, [])
+
   const parentRef = useRef<HTMLDivElement>(null)
+
+  // Stable estimateSize: new function only when sorted or expandedGroupIds
+  // actually change, not on every render. Prevents unnecessary virtualizer
+  // recalculation cycles on unrelated state updates.
+  const estimateSize = useCallback(
+    (index: number) => {
+      const group = sorted[index]
+      return 40 + (expandedGroupIds.has(group.id) ? group.items.length * 28 : 0)
+    },
+    [sorted, expandedGroupIds]
+  )
 
   const virtualizer = useVirtualizer({
     count: sorted.length,
     getScrollElement: () => parentRef.current,
-    estimateSize: (index) => {
-      const group = sorted[index]
-      return 40 + (expandedGroupIds.has(group.id) ? group.items.length * 28 : 0)
-    },
+    estimateSize,
     overscan: 8,
   })
 
-  function SortIcon({ field }: { field: SortField }) {
-    if (sortField !== field) return <ChevronsUpDown className="w-3 h-3 opacity-30" />
-    return sortDirection === 'asc' ? <ArrowUp className="w-3 h-3 text-accent" /> : <ArrowDown className="w-3 h-3 text-accent" />
-  }
+  // Explicitly reset cached item measurements when expansion state changes.
+  // Without this, the virtualizer may use stale heights for newly expanded
+  // rows until the next organic resize event.
+  // virtualizer is intentionally omitted from deps: its identity is stable
+  // across renders (useVirtualizer uses an internal ref).
+  useEffect(() => {
+    virtualizer.measure()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [expandedGroupIds])
 
   return (
     <div className="flex flex-col h-full min-h-0">
@@ -82,7 +124,14 @@ export function AuditTable({ groups }: AuditTableProps) {
             )}
             onClick={() => col.key && handleSort(col.key)}
           >
-            {col.label}{col.key && <SortIcon field={col.key} />}
+            {col.label}
+            {col.key && (
+              <SortIcon
+                field={col.key}
+                sortField={sortField}
+                sortDirection={sortDirection}
+              />
+            )}
           </div>
         ))}
       </div>
@@ -101,8 +150,8 @@ export function AuditTable({ groups }: AuditTableProps) {
                   rank={vItem.index}
                   isSelected={selectedGroupId === group.id}
                   isExpanded={expandedGroupIds.has(group.id)}
-                  onSelect={() => selectGroup(selectedGroupId === group.id ? null : group.id)}
-                  onToggleExpand={() => toggleGroupExpand(group.id)}
+                  onSelect={handleSelect}
+                  onToggleExpand={handleToggleExpand}
                 />
               </div>
             )

@@ -1,3 +1,4 @@
+import { memo } from 'react'
 import type { TypographyProperties } from '../../../modules/typography/types'
 import { cn } from '../../lib/cn'
 
@@ -11,7 +12,10 @@ const textCaseMap: Record<string, string> = {
   SMALL_CAPS: 'uppercase', SMALL_CAPS_FORCED: 'uppercase', ORIGINAL: 'none',
 }
 
-export function TypographyPreview({ properties, className }: TypographyPreviewProps) {
+// memo: only re-renders when properties or className reference changes.
+// Since TypographyProperties are interned strings, reference equality holds
+// for groups whose descriptor has not changed.
+export const TypographyPreview = memo(function TypographyPreview({ properties, className }: TypographyPreviewProps) {
   const { fontFamily, fontSize, lineHeight, letterSpacing, textDecoration, textCase } = properties
   const lhPx = lineHeight.unit === 'AUTO' ? undefined : lineHeight.unit === 'PIXELS' ? `${lineHeight.value}px` : `${lineHeight.value}%`
   const lsPx = letterSpacing.unit === 'PIXELS' ? `${letterSpacing.value}px` : `${letterSpacing.value / 100}em`
@@ -36,4 +40,4 @@ export function TypographyPreview({ properties, className }: TypographyPreviewPr
       </span>
     </div>
   )
-}
+})

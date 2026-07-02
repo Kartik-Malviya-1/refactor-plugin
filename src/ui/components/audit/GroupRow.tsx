@@ -1,3 +1,4 @@
+import { memo } from 'react'
 import { ChevronRight, MousePointerClick } from 'lucide-react'
 import { cn } from '../../lib/cn'
 import type { AuditGroup } from '../../../shared/types'
@@ -11,21 +12,33 @@ interface GroupRowProps {
   group: AuditGroup<TypographyProperties>
   isSelected: boolean
   isExpanded: boolean
-  onSelect: () => void
-  onToggleExpand: () => void
+  // Callbacks accept groupId so the parent can provide stable references
+  // via useCallback without needing to create per-row closures.
+  onSelect: (groupId: string) => void
+  onToggleExpand: (groupId: string) => void
   rank: number
 }
 
 const COL_WIDTHS = '52px 1fr 80px 58px 70px 72px 64px 36px'
 
-export function GroupRow({ group, isSelected, isExpanded, onSelect, onToggleExpand, rank }: GroupRowProps) {
+// memo: prevents re-renders when props are reference-equal.
+// Effective because AuditTable passes stable onSelect / onToggleExpand
+// callbacks (useCallback with [] deps reading state via getState()).
+export const GroupRow = memo(function GroupRow({
+  group,
+  isSelected,
+  isExpanded,
+  onSelect,
+  onToggleExpand,
+  rank,
+}: GroupRowProps) {
   const p = group.descriptor
 
   return (
     <>
       <div
         role="row"
-        onClick={onSelect}
+        onClick={() => onSelect(group.id)}
         className={cn(
           'grid items-center text-sm cursor-pointer select-none transition-colors duration-120 border-b border-border-subtle',
           isSelected ? 'bg-accent-subtle' : 'hover:bg-surface-hover'
@@ -47,7 +60,10 @@ export function GroupRow({ group, isSelected, isExpanded, onSelect, onToggleExpa
         </div>
         <div className="flex items-center justify-center">
           <button
-            onClick={(e) => { e.stopPropagation(); sendToPlugin({ type: 'SELECT_NODES', payload: { nodeIds: group.items.map(i => i.nodeId) } }) }}
+            onClick={(e) => {
+              e.stopPropagation()
+              sendToPlugin({ type: 'SELECT_NODES', payload: { nodeIds: group.items.map(i => i.nodeId) } })
+            }}
             className="p-1 rounded text-ink-3 hover:text-accent hover:bg-accent-subtle transition-colors"
             title="Select all in Figma"
           >
@@ -56,7 +72,7 @@ export function GroupRow({ group, isSelected, isExpanded, onSelect, onToggleExpa
         </div>
         <div className="flex items-center justify-center">
           <button
-            onClick={(e) => { e.stopPropagation(); onToggleExpand() }}
+            onClick={(e) => { e.stopPropagation(); onToggleExpand(group.id) }}
             className="p-1 rounded text-ink-3 hover:text-ink transition-colors"
           >
             <ChevronRight className={cn('w-3.5 h-3.5 transition-transform duration-120', isExpanded && 'rotate-90')} />
@@ -87,4 +103,4 @@ export function GroupRow({ group, isSelected, isExpanded, onSelect, onToggleExpa
       )}
     </>
   )
-}
+})
