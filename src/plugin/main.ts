@@ -20,7 +20,7 @@ function send(msg: PluginToUIMessage): void {
 }
 
 // ---------------------------------------------------------------------------
-// Profiler
+// Profiler output
 // ---------------------------------------------------------------------------
 
 function fmtMs(ms: number): string {
@@ -39,9 +39,9 @@ function printScanProfile(stages: ProfileStage[], totalMs: number): void {
   const VAL_COL  = 9
 
   function row(name: string, ms: number): string {
-    const dots  = '.'.repeat(Math.max(1, NAME_COL - name.length + 1))
-    const val   = fmtMs(ms).padStart(VAL_COL)
-    const pct   = totalMs > 0
+    const dots = '.'.repeat(Math.max(1, NAME_COL - name.length + 1))
+    const val  = fmtMs(ms).padStart(VAL_COL)
+    const pct  = totalMs > 0
       ? `${((ms / totalMs) * 100).toFixed(1).padStart(5)}%`
       : '  0.0%'
     return `  ${name} ${dots} ${val}   ${pct}`
@@ -58,6 +58,28 @@ function printScanProfile(stages: ProfileStage[], totalMs: number): void {
   console.log(row('Total', totalMs))
   console.log('  └' + '─'.repeat(NAME_COL + VAL_COL + 13) + '┘')
   console.log(`  Nodes scanned: ${_scanTimings.nodeCount}`)
+
+  // ── Before / After: Extraction ──────────────────────────────────────
+  // The micro-benchmark ran both extractors on the same sample nodes;
+  // we extrapolate to the full node count so both numbers are comparable.
+  if (_scanTimings.benchSampleSize > 0) {
+    const n         = _scanTimings.nodeCount
+    const oldEstMs  = Math.round(_scanTimings.benchBaselineMsPerNode * n)
+    const newActMs  = _scanTimings.extractionMs
+    const pctBetter = oldEstMs > 0
+      ? Math.round((1 - newActMs / oldEstMs) * 100)
+      : 0
+
+    const sampleNote = `(${_scanTimings.benchSampleSize}-node sample × ${n} nodes)`
+
+    console.log('')
+    console.log('  ┌─ Extraction optimisation: before → after ─────────┐')
+    console.log(`  │  Before (double-access)  ${fmtMs(oldEstMs).padStart(8)}  estimated ${sampleNote}`)
+    console.log(`  │  After  (cached access)  ${fmtMs(newActMs).padStart(8)}  measured`)
+    console.log(`  │  Improvement             ~${pctBetter}% faster`)
+    console.log('  └' + '─'.repeat(NAME_COL + VAL_COL + 30) + '┘')
+  }
+
   console.log('')
 }
 
@@ -128,8 +150,6 @@ figma.ui.onmessage = async (rawMsg: unknown) => {
               : 'Entire File'
 
         // ── Stage: Serialization ──────────────────────────────────────────
-        // Measure the cost of JSON-serialising the result before it travels
-        // across the plugin sandbox boundary via postMessage.
         const tSerial = Date.now()
         const result: AuditResult = {
           moduleId,
@@ -140,8 +160,6 @@ figma.ui.onmessage = async (rawMsg: unknown) => {
           scannedAt: tTotal,
           durationMs: Date.now() - tTotal,
         }
-        // Force a full serialisation round-trip to get an honest measurement.
-        // The structured-clone that postMessage performs has similar cost.
         void JSON.stringify(result)
         const serialMs = Date.now() - tSerial
 
@@ -155,12 +173,12 @@ figma.ui.onmessage = async (rawMsg: unknown) => {
         // ── Profile report ────────────────────────────────────────────────
         printScanProfile(
           [
-            { name: 'Traversal',      ms: _scanTimings.traversalMs },
-            { name: 'Extraction',     ms: _scanTimings.extractionMs },
-            { name: 'Normalization',  ms: _groupTimings.normalizationMs },
-            { name: 'Sorting',        ms: _groupTimings.sortingMs },
-            { name: 'Serialization',  ms: serialMs },
-            { name: 'Messaging',      ms: msgMs },
+            { name: 'Traversal',     ms: _scanTimings.traversalMs },
+            { name: 'Extraction',    ms: _scanTimings.extractionMs },
+            { name: 'Normalization', ms: _groupTimings.normalizationMs },
+            { name: 'Sorting',       ms: _groupTimings.sortingMs },
+            { name: 'Serialization', ms: serialMs },
+            { name: 'Messaging',     ms: msgMs },
           ],
           totalMs
         )
