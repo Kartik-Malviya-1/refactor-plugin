@@ -5,10 +5,12 @@ import { formatLineHeight, formatLetterSpacing, formatTextCase, formatTextDecora
 import { PropertyRow } from './PropertyRow'
 import { Button } from '../ui/Button'
 import { Badge } from '../ui/Badge'
+import { InfoButton } from '../ui/InfoButton'
 import { TypographyPreview } from '../audit/TypographyPreview'
 import { sendToPlugin } from '../../hooks/useSendMessage'
 import { useUIStore } from '../../store/ui'
 import { locationFromItem } from '../../../shared/navigation'
+import { DEFINITIONS } from '../../lib/definitions'
 
 interface TypographyInspectorProps {
   group: AuditGroup<TypographyProperties>
@@ -19,7 +21,6 @@ export function TypographyInspector({ group }: TypographyInspectorProps) {
   const p = group.descriptor
 
   function handleSelectAll() {
-    // Build NodeLocation[] so the plugin can switch pages for cross-page layers.
     const locations = group.items.map(locationFromItem)
     sendToPlugin({ type: 'SELECT_NODES', payload: { locations } })
   }
@@ -41,10 +42,12 @@ export function TypographyInspector({ group }: TypographyInspectorProps) {
       </div>
 
       <div className="flex-1 overflow-y-auto">
+        {/* Preview */}
         <div className="flex items-center justify-center h-20 border-b border-border-subtle bg-surface-0">
           <TypographyPreview properties={{ ...p, fontSize: Math.min(p.fontSize, 28) }} className="w-full h-full" />
         </div>
 
+        {/* Label + count */}
         <div className="px-3 py-2.5 border-b border-border-subtle">
           <div className="flex items-center justify-between gap-2">
             <p className="text-xs font-semibold text-ink truncate flex-1">{group.label}</p>
@@ -52,17 +55,33 @@ export function TypographyInspector({ group }: TypographyInspectorProps) {
           </div>
         </div>
 
+        {/* Properties */}
         <div className="px-3 py-2">
-          <p className="text-2xs font-semibold text-ink-disabled uppercase tracking-widest mb-1.5">Properties</p>
-          <PropertyRow label="Font Family" value={p.fontFamily} />
-          <PropertyRow label="Weight" value={`${p.fontStyle} (${p.fontWeight})`} />
-          <PropertyRow label="Size" value={`${p.fontSize}px`} />
-          <PropertyRow label="Line Height" value={formatLineHeight(p.lineHeight)} />
+          <div className="flex items-center gap-1.5 mb-1.5">
+            <p className="text-2xs font-semibold text-ink-disabled uppercase tracking-widest">Properties</p>
+          </div>
+
+          {/* Source classification */}
+          <div className="flex items-baseline justify-between gap-3 py-1.5 border-b border-border-subtle">
+            <div className="flex items-center gap-1 shrink-0">
+              <span className="text-xs text-ink-3">Source</span>
+              <InfoButton definition={DEFINITIONS.source} side="right" />
+            </div>
+            <span className="text-xs text-ink-disabled text-right">
+              Unknown
+            </span>
+          </div>
+
+          <PropertyRow label="Font Family"    value={p.fontFamily} />
+          <PropertyRow label="Weight"         value={`${p.fontStyle} (${p.fontWeight})`} />
+          <PropertyRow label="Size"           value={`${p.fontSize}px`} />
+          <PropertyRow label="Line Height"    value={formatLineHeight(p.lineHeight)} />
           <PropertyRow label="Letter Spacing" value={formatLetterSpacing(p.letterSpacing)} />
-          <PropertyRow label="Text Case" value={formatTextCase(p.textCase)} />
-          <PropertyRow label="Decoration" value={formatTextDecoration(p.textDecoration)} />
+          <PropertyRow label="Text Case"      value={formatTextCase(p.textCase)} />
+          <PropertyRow label="Decoration"     value={formatTextDecoration(p.textDecoration)} />
         </div>
 
+        {/* Actions */}
         <div className="px-3 py-2 border-t border-border-subtle">
           <p className="text-2xs font-semibold text-ink-disabled uppercase tracking-widest mb-2">Actions</p>
           <div className="flex flex-col gap-1.5">
@@ -90,9 +109,12 @@ export function TypographyInspector({ group }: TypographyInspectorProps) {
           </div>
         </div>
 
+        {/* Affected layers */}
         <div className="border-t border-border-subtle">
           <div className="px-3 py-2">
-            <p className="text-2xs font-semibold text-ink-disabled uppercase tracking-widest">Layers ({group.count})</p>
+            <p className="text-2xs font-semibold text-ink-disabled uppercase tracking-widest">
+              Layers ({group.count})
+            </p>
           </div>
           <div className="pb-2">
             {group.items.map((item) => (
@@ -100,15 +122,13 @@ export function TypographyInspector({ group }: TypographyInspectorProps) {
                 key={item.id}
                 onClick={() => handleSelectLayer(item)}
                 className="w-full flex items-start gap-2 px-3 py-1.5 hover:bg-surface-hover transition-colors text-left"
-                title={item.pageName !== (group.items[0]?.pageName ?? '') ? `On page: ${item.pageName}` : undefined}
+                title={`Navigate to layer on ${item.pageName}`}
               >
                 <div className="w-1 h-1 rounded-full bg-border-strong shrink-0 mt-1.5" />
                 <div className="flex-1 min-w-0">
                   <p className="text-xs font-medium text-ink truncate">{item.nodeName}</p>
                   {item.parentName && <p className="text-2xs text-ink-3 truncate">{item.parentName}</p>}
-                  {item.pageName && (
-                    <p className="text-2xs text-ink-disabled truncate">{item.pageName}</p>
-                  )}
+                  <p className="text-2xs text-ink-disabled truncate">{item.pageName}</p>
                 </div>
               </button>
             ))}

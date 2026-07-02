@@ -1,8 +1,9 @@
 import { usePluginMessages } from './hooks/usePluginMessage'
 import { AppShell } from './components/layout/AppShell'
-import { DashboardPage } from './pages/DashboardPage'
+import { OverviewPage } from './pages/OverviewPage'
 import { ScanPage } from './pages/ScanPage'
 import { AuditPage } from './pages/AuditPage'
+import { SourcesPage } from './pages/SourcesPage'
 import { useUIStore } from './store/ui'
 
 export default function App() {
@@ -11,9 +12,18 @@ export default function App() {
 
   return (
     <AppShell>
-      {currentPage === 'dashboard' && <DashboardPage />}
-      {currentPage === 'scan' && <ScanPage />}
-      {currentPage === 'audit' && <AuditPage />}
+      {currentPage === 'overview'    && <OverviewPage />}
+      {currentPage === 'scan'        && <ScanPage />}
+      {currentPage === 'signatures'  && <AuditPage />}
+      {currentPage === 'sources'     && <SourcesPage />}
+      {currentPage === 'settings'    && (
+        <div className="flex items-center justify-center h-full">
+          <div className="text-center">
+            <p className="text-sm font-medium text-ink">Settings</p>
+            <p className="text-xs text-ink-3 mt-1">Coming in a future release.</p>
+          </div>
+        </div>
+      )}
     </AppShell>
   )
 }

@@ -2,34 +2,34 @@ import { ChevronRight, RotateCcw, X } from 'lucide-react'
 import { Button } from '../ui/Button'
 import { useUIStore } from '../../store/ui'
 import { useAuditStore } from '../../store/audit'
-import { MODULE_CATALOG } from '../../../engine/registry'
 
 export function Header() {
-  const { currentPage, activeModuleId, navigate } = useUIStore()
+  const { currentPage, navigate } = useUIStore()
   const { result, isScanning, cancelScan } = useAuditStore()
 
-  const module = MODULE_CATALOG.find((m) => m.id === activeModuleId)
-  const moduleName = module?.name ?? 'Audit'
-  const showAuditActions = currentPage === 'audit' && result
+  const showRescan = (currentPage === 'signatures' || currentPage === 'sources' || currentPage === 'overview') && result && !isScanning
 
   return (
     <header className="h-11 shrink-0 bg-surface-1 border-b border-border flex items-center px-4 gap-3">
+      {/* Breadcrumb */}
       <div className="flex items-center gap-1 text-sm text-ink-3 min-w-0">
-        {currentPage === 'dashboard' ? (
-          <span className="font-medium text-ink">Dashboard</span>
-        ) : currentPage === 'scan' ? (
+        {currentPage === 'overview' && (
+          <span className="font-medium text-ink">Overview</span>
+        )}
+
+        {currentPage === 'scan' && (
           <>
-            <button onClick={() => navigate('dashboard')} className="hover:text-ink transition-colors truncate">
-              Dashboard
-            </button>
+            <button onClick={() => navigate('overview')} className="hover:text-ink transition-colors">Overview</button>
             <ChevronRight className="w-3.5 h-3.5 shrink-0" />
-            <span className="font-medium text-ink">{moduleName} &#8212; Scan</span>
+            <span className="font-medium text-ink">Scan</span>
           </>
-        ) : (
+        )}
+
+        {currentPage === 'signatures' && (
           <>
-            <button onClick={() => navigate('dashboard')} className="hover:text-ink transition-colors">Dashboard</button>
+            <button onClick={() => navigate('overview')} className="hover:text-ink transition-colors">Overview</button>
             <ChevronRight className="w-3.5 h-3.5 shrink-0" />
-            <span className="font-medium text-ink">{moduleName}</span>
+            <span className="font-medium text-ink">Typography Signatures</span>
             {result && (
               <>
                 <ChevronRight className="w-3.5 h-3.5 shrink-0" />
@@ -38,20 +38,39 @@ export function Header() {
             )}
           </>
         )}
+
+        {currentPage === 'sources' && (
+          <>
+            <button onClick={() => navigate('overview')} className="hover:text-ink transition-colors">Overview</button>
+            <ChevronRight className="w-3.5 h-3.5 shrink-0" />
+            <span className="font-medium text-ink">Sources</span>
+          </>
+        )}
+
+        {currentPage === 'settings' && (
+          <span className="font-medium text-ink">Settings</span>
+        )}
       </div>
+
       <div className="flex-1" />
+
+      {/* Actions */}
       {isScanning && (
         <Button variant="ghost" size="sm" onClick={cancelScan}>
           <X className="w-3.5 h-3.5" />Cancel
         </Button>
       )}
-      {showAuditActions && !isScanning && (
+
+      {showRescan && (
         <Button variant="ghost" size="sm" onClick={() => navigate('scan')}>
           <RotateCcw className="w-3 h-3" />Re-scan
         </Button>
       )}
-      {currentPage === 'dashboard' && !isScanning && (
-        <Button variant="primary" size="sm" onClick={() => navigate('scan')}>Run Audit</Button>
+
+      {currentPage === 'overview' && !result && !isScanning && (
+        <Button variant="primary" size="sm" onClick={() => navigate('scan')}>
+          Run Scan
+        </Button>
       )}
     </header>
   )

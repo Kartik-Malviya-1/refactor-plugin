@@ -1,17 +1,23 @@
 import { create } from 'zustand'
 
-export type AppPage = 'dashboard' | 'scan' | 'audit'
+// ---------------------------------------------------------------------------
+// Workspace navigation pages
+// ---------------------------------------------------------------------------
+export type AppPage = 'overview' | 'scan' | 'signatures' | 'sources' | 'settings'
 
 interface UIState {
   currentPage: AppPage
   activeModuleId: string
+
   selectionCount: number
+
   selectedGroupId: string | null
   inspectorOpen: boolean
   expandedGroupIds: Set<string>
   searchQuery: string
   sortField: 'count' | 'family' | 'size'
   sortDirection: 'asc' | 'desc'
+
   toast: { message: string; type: 'success' | 'info' | 'error' } | null
 
   navigate: (page: AppPage) => void
@@ -26,7 +32,7 @@ interface UIState {
 }
 
 export const useUIStore = create<UIState>((set, get) => ({
-  currentPage: 'dashboard',
+  currentPage: 'overview',
   activeModuleId: 'typography',
   selectionCount: 0,
   selectedGroupId: null,
@@ -41,19 +47,12 @@ export const useUIStore = create<UIState>((set, get) => ({
   setActiveModule: (id) => set({ activeModuleId: id }),
   setSelectionCount: (n) => set({ selectionCount: n }),
 
-  selectGroup: (id) =>
-    set({
-      selectedGroupId: id,
-      inspectorOpen: id !== null,
-    }),
+  selectGroup: (id) => set({ selectedGroupId: id, inspectorOpen: id !== null }),
 
   toggleGroupExpand: (id) => {
     const expanded = new Set(get().expandedGroupIds)
-    if (expanded.has(id)) {
-      expanded.delete(id)
-    } else {
-      expanded.add(id)
-    }
+    if (expanded.has(id)) expanded.delete(id)
+    else expanded.add(id)
     set({ expandedGroupIds: expanded })
   },
 
@@ -62,9 +61,7 @@ export const useUIStore = create<UIState>((set, get) => ({
 
   showToast: (message, type = 'info') => {
     set({ toast: { message, type } })
-    window.setTimeout(() => {
-      set({ toast: null })
-    }, 3000)
+    window.setTimeout(() => set({ toast: null }), 3000)
   },
 
   clearToast: () => set({ toast: null }),

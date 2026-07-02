@@ -19,7 +19,8 @@ export function usePluginMessages(): void {
 
         case 'SCAN_COMPLETE':
           setScanResult(msg.payload)
-          navigate('audit')
+          // Land on Overview after every successful scan.
+          navigate('overview')
           break
 
         case 'SCAN_ERROR':
@@ -38,20 +39,17 @@ export function usePluginMessages(): void {
         case 'NODES_SELECTED': {
           const { count, pageChanged, pageName, notFound } = msg.payload
           const layerWord = count !== 1 ? 'layers' : 'layer'
-
           let message = `${count} ${layerWord} selected`
           if (pageChanged) message = `Navigated to “${pageName}” — ${message}`
           if (notFound > 0) {
             const missingWord = notFound !== 1 ? 'layers' : 'layer'
             message += ` (${notFound} ${missingWord} no longer exist)`
           }
-
           showToast(message, 'success')
           break
         }
 
         case 'NAVIGATION_ERROR':
-          // Show meaningful error — never show "0 layers found"
           showToast(msg.payload.error, 'error')
           break
       }
