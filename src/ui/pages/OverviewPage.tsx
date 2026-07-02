@@ -4,13 +4,22 @@ import { Button } from '../components/ui/Button'
 import { useUIStore } from '../store/ui'
 import { useAuditStore } from '../store/audit'
 import { useCandidateFamilies } from '../hooks/useCandidateFamilies'
+import { useMigrationStore } from '../store/migration'
 import type { SourceType } from '../../shared/types'
+
+const STRATEGY_LABEL: Record<string, string> = {
+  'existing-design-system': 'Existing Design System',
+  'existing-variables':      'Existing Variables',
+  'create-new':              'Create New',
+  'manual':                  'Manual Planning',
+  'hybrid':                  'Hybrid',
+}
 
 function StatCard({ label, value, sub, dim = false }: { label: string; value: string | number; sub?: string; dim?: boolean }) {
   return (
-    <div className={`flex-1 bg-surface-1 border border-border rounded px-3 py-2.5 min-w-0 ${ dim ? 'opacity-50' : ''}`}>
+    <div className={`flex-1 bg-surface-1 border border-border rounded px-3 py-2.5 min-w-0 ${dim ? 'opacity-50' : ''}`}>
       <p className="text-2xs text-ink-3 font-medium uppercase tracking-wider mb-1">{label}</p>
-      <p className={`text-xl font-semibold tabular-nums leading-none ${ dim ? 'text-ink-3' : 'text-ink'}`}>{value}</p>
+      <p className={`text-xl font-semibold tabular-nums leading-none ${dim ? 'text-ink-3' : 'text-ink'}`}>{value}</p>
       {sub && <p className="text-xs text-ink-3 mt-1 truncate">{sub}</p>}
     </div>
   )
@@ -27,7 +36,6 @@ function ComingSoonCard({ label, description }: { label: string; description: st
 }
 
 interface Observation { level: 'info' | 'warning'; message: string }
-
 function ObsBadge({ obs }: { obs: Observation }) {
   return (
     <div className={`flex items-start gap-2 px-3 py-2 rounded border text-xs leading-relaxed ${
@@ -43,6 +51,7 @@ export function OverviewPage() {
   const { navigate } = useUIStore()
   const { result } = useAuditStore()
   const families = useCandidateFamilies()
+  const { plan } = useMigrationStore()
 
   const { stats, bySource, observations } = useMemo(() => {
     if (!result) return { stats: null, bySource: new Map<SourceType, number>(), observations: [] }
@@ -56,27 +65,32 @@ export function OverviewPage() {
       src.set(s, (src.get(s) ?? 0) + g.count)
     }
 
+    // Candidate Families analytics
     const familyStats = families.length > 0 ? {
-      totalFamilies:           families.length,
-      avgFamilySize:           Math.round((result.groups.length / families.length) * 10) / 10,
-      avgConfidence:           Math.round(families.reduce((s, f) => s + f.confidence, 0) / families.length),
-      totalOutliers:           families.reduce((s, f) => s + f.outlierCount, 0),
+      totalFamilies:              families.length,
+      avgFamilySize:              Math.round((result.groups.length / families.length) * 10) / 10,
+      avgConfidence:              Math.round(families.reduce((s, f) => s + f.confidence, 0) / families.length),
+      totalOutliers:              families.reduce((s, f) => s + f.outlierCount, 0),
       consolidationOpportunities: families.filter(f => f.signatureCount > 1).length,
-      largestFamily:           families.reduce((m, f) => f.signatureCount > m.signatureCount ? f : m),
+    } : null
+
+    // Planning progress
+    const planEntries = Object.values(plan.entries)
+    const planStats = planEntries.length > 0 ? {
+      total:     planEntries.length,
+      planned:   planEntries.filter(e => e.status === 'planned').length,
+      skipped:   planEntries.filter(e => e.status === 'skipped').length,
+      remaining: planEntries.filter(e => e.status === 'unreviewed' || e.status === 'in-progress').length,
+      readiness: Math.round((planEntries.filter(e => e.status === 'planned' || e.status === 'skipped').length / planEntries.length) * 100),
+      strategy:  plan.strategy,
     } : null
 
     const obs: Observation[] = []
     const rawLayers = src.get('Raw Values') ?? 0
-    if (rawLayers > result.totalItems * 0.5) {
-      obs.push({ level: 'warning', message: `${Math.round(rawLayers / result.totalItems * 100)}% of text layers use raw values. Consider adopting text styles.` })
-    }
+    if (rawLayers > result.totalItems * 0.5) obs.push({ level: 'warning', message: `${Math.round(rawLayers / result.totalItems * 100)}% of text layers use raw values.` })
     const sourcesPresent = [...src.keys()].filter(s => s !== 'Unknown')
-    if (sourcesPresent.length > 1) {
-      obs.push({ level: 'info', message: `Multiple typography sources detected: ${sourcesPresent.join(', ')}.` })
-    }
-    if (result.groups.length > 200) {
-      obs.push({ level: 'warning', message: `${result.groups.length.toLocaleString()} unique Typography Signatures. A well-maintained system typically uses fewer.` })
-    }
+    if (sourcesPresent.length > 1) obs.push({ level: 'info', message: `Multiple typography sources: ${sourcesPresent.join(', ')}.` })
+    if (result.groups.length > 200) obs.push({ level: 'warning', message: `${result.groups.length.toLocaleString()} unique Typography Signatures.` })
 
     return {
       stats: {
@@ -86,12 +100,12 @@ export function OverviewPage() {
         scopeLabel: result.scopeLabel,
         scannedAt: new Date(result.scannedAt).toLocaleTimeString(),
         durationSec: (result.durationMs / 1000).toFixed(1),
-        familyStats,
+        familyStats, planStats,
       },
       bySource: src,
       observations: obs,
     }
-  }, [result, families])
+  }, [result, families, plan])
 
   if (!stats) {
     return (
@@ -106,7 +120,7 @@ export function OverviewPage() {
               <Type className="w-6 h-6 text-ink-3" strokeWidth={1.5} />
             </div>
             <p className="text-sm font-medium text-ink mb-1">No scan data yet</p>
-            <p className="text-xs text-ink-3 leading-relaxed mb-4">Scan this document to see a summary of typography signatures, sources, and candidate families.</p>
+            <p className="text-xs text-ink-3 leading-relaxed mb-4">Scan this document to see a summary of typography signatures, sources, candidate families and planning progress.</p>
             <Button variant="primary" size="md" onClick={() => navigate('scan')}>Run Scan</Button>
           </div>
         </div>
@@ -114,7 +128,7 @@ export function OverviewPage() {
     )
   }
 
-  const { familyStats } = stats
+  const { familyStats, planStats } = stats
 
   return (
     <div className="flex flex-col h-full overflow-y-auto bg-surface-0">
@@ -160,10 +174,32 @@ export function OverviewPage() {
           <section>
             <p className="text-2xs font-semibold text-ink-disabled uppercase tracking-widest mb-2">Candidate Families</p>
             <div className="flex gap-2 flex-wrap">
-              <StatCard label="Families" value={familyStats.totalFamilies} sub={`avg ${familyStats.avgFamilySize} sigs each`} />
+              <StatCard label="Families" value={familyStats.totalFamilies} sub={`avg ${familyStats.avgFamilySize} sigs`} />
               <StatCard label="Avg Confidence" value={`${familyStats.avgConfidence}%`} />
-              <StatCard label="Can Consolidate" value={familyStats.consolidationOpportunities} sub="families with 2+ sigs" />
-              {familyStats.totalOutliers > 0 && <StatCard label="Outliers" value={familyStats.totalOutliers} sub="across all families" />}
+              <StatCard label="Can Consolidate" value={familyStats.consolidationOpportunities} sub="families" />
+              {familyStats.totalOutliers > 0 && <StatCard label="Outliers" value={familyStats.totalOutliers} />}
+            </div>
+          </section>
+        )}
+
+        {planStats && (
+          <section>
+            <div className="flex items-center justify-between mb-2">
+              <p className="text-2xs font-semibold text-ink-disabled uppercase tracking-widest">Planning Progress</p>
+              {planStats.strategy && (
+                <span className="text-2xs text-ink-3">
+                  Strategy: {STRATEGY_LABEL[planStats.strategy] ?? planStats.strategy}
+                </span>
+              )}
+            </div>
+            <div className="h-1.5 bg-surface-hover rounded-full overflow-hidden mb-2">
+              <div className="h-full bg-accent rounded-full" style={{ width: `${planStats.readiness}%` }} />
+            </div>
+            <div className="flex gap-2 flex-wrap">
+              <StatCard label="Planned" value={planStats.planned} sub="families" />
+              <StatCard label="Skipped" value={planStats.skipped} />
+              <StatCard label="Remaining" value={planStats.remaining} />
+              <StatCard label="Readiness" value={`${planStats.readiness}%`} sub="planning complete" />
             </div>
           </section>
         )}
@@ -173,7 +209,7 @@ export function OverviewPage() {
             Platform Insights <span className="normal-case font-normal">Coming Soon</span>
           </p>
           <div className="flex gap-2 flex-wrap">
-            <ComingSoonCard label="Migration Readiness" description="Percentage of layers ready to migrate" />
+            <ComingSoonCard label="Migration Readiness" description="% of layers ready to migrate" />
             <ComingSoonCard label="Suggested Reduction" description="Estimated signatures after standardisation" />
           </div>
         </section>
@@ -183,8 +219,8 @@ export function OverviewPage() {
             View Signatures <ArrowRight className="w-3.5 h-3.5" />
           </Button>
           {familyStats && (
-            <Button variant="secondary" size="sm" onClick={() => navigate('families')}>
-              <GitBranch className="w-3.5 h-3.5" /> Candidate Families
+            <Button variant="secondary" size="sm" onClick={() => navigate('planning')}>
+              <GitBranch className="w-3.5 h-3.5" /> Design System Planning
             </Button>
           )}
           <Button variant="ghost" size="sm" onClick={() => navigate('sources')}>

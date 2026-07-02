@@ -18,7 +18,7 @@ const WORKSPACE_NAV: NavItem[] = [
   { id: 'overview',   label: 'Overview',                icon: LayoutDashboard, available: true },
   { id: 'signatures', label: 'Typography Signatures',  icon: Type,            available: true, requiresScan: true },
   { id: 'sources',    label: 'Sources',                icon: Layers,          available: true, requiresScan: true },
-  { id: 'families',   label: 'Candidate Families',     icon: GitBranch,       available: true, requiresScan: true },
+  { id: 'planning',   label: 'Design System Planning', icon: GitBranch,       available: true, requiresScan: true },
 ]
 
 const COMING_SOON_NAV: NavItem[] = [
@@ -31,10 +31,7 @@ export function Sidebar() {
 
   function handleNav(item: NavItem) {
     if (!item.available) return
-    if (item.requiresScan && !result) {
-      navigate('overview')
-      return
-    }
+    if (item.requiresScan && !result) { navigate('overview'); return }
     navigate(item.id)
   }
 
@@ -51,23 +48,15 @@ export function Sidebar() {
       </div>
 
       <nav className="flex-1 overflow-y-auto py-2 px-2">
-        <p className="px-2 py-1.5 text-2xs font-semibold text-ink-disabled uppercase tracking-widest">
-          Workspace
-        </p>
+        <p className="px-2 py-1.5 text-2xs font-semibold text-ink-disabled uppercase tracking-widest">Workspace</p>
         {WORKSPACE_NAV.map((item) => {
           const Icon = item.icon
           const isActive = currentPage === item.id
           return (
-            <button
-              key={item.id}
-              onClick={() => handleNav(item)}
-              className={cn(
-                'w-full flex items-center gap-2.5 px-2 py-1.5 rounded text-left transition-colors duration-120',
-                isActive
-                  ? 'bg-accent-subtle text-accent'
-                  : 'text-ink-2 hover:bg-surface-hover hover:text-ink'
-              )}
-            >
+            <button key={item.id} onClick={() => handleNav(item)} className={cn(
+              'w-full flex items-center gap-2.5 px-2 py-1.5 rounded text-left transition-colors duration-120',
+              isActive ? 'bg-accent-subtle text-accent' : 'text-ink-2 hover:bg-surface-hover hover:text-ink'
+            )}>
               <Icon className="w-3.5 h-3.5 shrink-0" strokeWidth={isActive ? 2 : 1.75} />
               <span className="text-sm flex-1 truncate">{item.label}</span>
             </button>
@@ -75,9 +64,7 @@ export function Sidebar() {
         })}
 
         <div className="my-2 mx-2 border-t border-border-subtle" />
-        <p className="px-2 py-1 text-2xs font-semibold text-ink-disabled uppercase tracking-widest">
-          Coming Soon
-        </p>
+        <p className="px-2 py-1 text-2xs font-semibold text-ink-disabled uppercase tracking-widest">Coming Soon</p>
         {COMING_SOON_NAV.map((item) => {
           const Icon = item.icon
           return (
@@ -91,15 +78,10 @@ export function Sidebar() {
       </nav>
 
       <div className="shrink-0 border-t border-border-subtle p-2">
-        <button
-          onClick={() => navigate('settings')}
-          className={cn(
-            'w-full flex items-center gap-2.5 px-2 py-1.5 rounded transition-colors duration-120',
-            currentPage === 'settings'
-              ? 'bg-accent-subtle text-accent'
-              : 'text-ink-disabled hover:text-ink-2 hover:bg-surface-hover'
-          )}
-        >
+        <button onClick={() => navigate('settings')} className={cn(
+          'w-full flex items-center gap-2.5 px-2 py-1.5 rounded transition-colors duration-120',
+          currentPage === 'settings' ? 'bg-accent-subtle text-accent' : 'text-ink-disabled hover:text-ink-2 hover:bg-surface-hover'
+        )}>
           <Settings className="w-3.5 h-3.5" strokeWidth={1.75} />
           <span className="text-sm">Settings</span>
         </button>
