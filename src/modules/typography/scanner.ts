@@ -9,25 +9,27 @@ export const _scanTimings = {
   traversalMs: 0,
   extractionMs: 0,
   nodeCount: 0,
+  // Total onProgress calls dispatched during the scan.
+  // Shows the before/after impact of time-based throttling.
+  progressEventCount: 0,
   benchSampleSize: 0,
   benchBaselineMsPerNode: 0,
   benchOptimizedMsPerNode: 0,
 }
 
+// Yield to the event loop every N nodes to keep the plugin thread responsive.
+const YIELD_EVERY = 200
+
+// Minimum elapsed time between progress sends.
+// Decouples UI update frequency from node count so message volume
+// is bounded by scan duration rather than file size.
+// At 150ms: ~6–7 updates/second — smooth for a progress bar.
+const PROGRESS_THROTTLE_MS = 150
+
 const BENCH_SAMPLE = 20
 
 // ---------------------------------------------------------------------------
 // String intern pool
-//
-// Font families ("Inter"), font styles ("Regular"), page names, and parent
-// frame names repeat across thousands of nodes. Each Figma bridge property
-// access returns a new JS string object even when the value is identical.
-// Without interning: 50K nodes using "Inter" = 50K separate string objects.
-// With interning:    50K nodes using "Inter" = 1 string object, shared.
-//
-// The pool is module-level so it stays warm across rescans in the same
-// plugin session. Its size is bounded by the number of unique string values
-// ever seen (font families + styles + page names — typically < 200 entries).
 // ---------------------------------------------------------------------------
 const _stringPool = new Map<string, string>()
 
@@ -165,8 +167,6 @@ function extractProperties(node: TextNode): TypographyProperties | null {
       : (rawTD as TextDecoration)
 
     return {
-      // intern() deduplicates repeated string values across nodes.
-      // All nodes using "Inter Regular" share the same two string objects.
       fontFamily: intern(fontName.family),
       fontStyle:  intern(fontName.style),
       fontWeight: styleToWeight(fontName.style),
@@ -191,7 +191,16 @@ export async function scanTypography(
   scope: ScanScope,
   onProgress?: (p: ScanProgress) => void
 ): Promise<AuditItem<TypographyProperties>[]> {
-  onProgress?.({ current: 0, total: 0, phase: 'collecting', label: 'Collecting text layers…' })
+  // Reset per-scan counters.
+  _scanTimings.progressEventCount = 0
+
+  // Helper that sends a progress event and increments the counter.
+  function sendProgress(p: ScanProgress): void {
+    onProgress?.(p)
+    _scanTimings.progressEventCount++
+  }
+
+  sendProgress({ current: 0, total: 0, phase: 'collecting', label: 'Collecting text layers…' })
 
   // ── Stage: Traversal ────────────────────────────────────────────────────
   const tTraversalStart = Date.now()
@@ -216,7 +225,9 @@ export async function scanTypography(
   } else {
     await figma.loadAllPagesAsync()
     for (const page of figma.root.children) {
-      onProgress?.({
+      // One progress event per page during traversal — not throttled because
+      // page count is bounded and the label update is meaningful here.
+      sendProgress({
         current: 0,
         total: 0,
         phase: 'collecting',
@@ -226,7 +237,6 @@ export async function scanTypography(
       const countBefore = textNodes.length
       findTextNodes(page, textNodes)
 
-      // Intern the page name once per page rather than once per node.
       const pageInfo: PageInfo = { pageId: page.id, pageName: intern(page.name) }
       for (let i = countBefore; i < textNodes.length; i++) {
         nodeToPage.set(textNodes[i].id, pageInfo)
@@ -262,14 +272,28 @@ export async function scanTypography(
   const total = textNodes.length
   const items: AuditItem<TypographyProperties>[] = []
 
-  // Intern the current page name once for selection/page scope.
   const currentPageId   = figma.currentPage.id
   const currentPageName = intern(figma.currentPage.name)
 
+  // Tracks when the last progress event was sent.
+  // The extraction loop yields every YIELD_EVERY nodes but only sends
+  // a progress update when PROGRESS_THROTTLE_MS have elapsed, decoupling
+  // UI update rate from file size.
+  let lastProgressAt = Date.now()
+
   for (let i = 0; i < textNodes.length; i++) {
-    if (i % 200 === 0) {
-      onProgress?.({ current: i, total, phase: 'analyzing', label: `Analyzing ${i} of ${total}…` })
+    if (i % YIELD_EVERY === 0) {
+      // Always yield — keeps plugin thread responsive and allows cancellation.
       await new Promise<void>((r) => setTimeout(r, 0))
+
+      // Only send a progress event if enough time has elapsed.
+      // This bounds message volume to ~scan_duration / PROGRESS_THROTTLE_MS
+      // regardless of how many nodes are in the file.
+      const now = Date.now()
+      if (now - lastProgressAt >= PROGRESS_THROTTLE_MS) {
+        sendProgress({ current: i, total, phase: 'analyzing', label: `Analyzing ${i} of ${total}…` })
+        lastProgressAt = now
+      }
     }
 
     const node = textNodes[i]
@@ -283,7 +307,6 @@ export async function scanTypography(
 
     let parentName: string | undefined
     if (node.parent && node.parent.type !== 'PAGE') {
-      // intern() ensures all nodes inside the same parent share one string object.
       parentName = intern(node.parent.name)
     }
 
@@ -298,13 +321,14 @@ export async function scanTypography(
     })
   }
 
+  // Guarantee one final progress event at 100% so the UI always
+  // transitions through completion before SCAN_COMPLETE arrives.
+  sendProgress({ current: total, total, phase: 'grouping', label: 'Grouping results…' })
+
   _scanTimings.extractionMs = Date.now() - tExtractionStart
 
-  // Release TextNode proxy references so GC can reclaim them before
-  // the grouping phase creates its own memory pressure.
+  // Release TextNode proxy references before the grouping phase.
   textNodes.length = 0
-
-  onProgress?.({ current: total, total, phase: 'grouping', label: 'Grouping results…' })
 
   return items
 }
