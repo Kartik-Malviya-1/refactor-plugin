@@ -11,24 +11,17 @@ import type { CandidateFamily } from '../../similarity/types'
 interface MigrationState {
   plan: MigrationPlan
 
-  /** (Re)initialise the plan from the current Candidate Families list.
-   *  Preserves existing entries for families that are still present. */
   initPlan: (families: CandidateFamily[]) => void
-
-  /** Set the high-level migration strategy. */
-  setStrategy: (strategy: MigrationStrategy) => void
-
-  /** Confirm a consolidation target for a family (sets status → planned/skipped). */
-  setTarget: (familyId: string, target: ConsolidationTarget) => void
-
-  /** Clear the target and revert a family to in-progress. */
+  setStrategy: (strategy: MigrationStrategy | null) => void
+  setTarget: (
+    familyId: string,
+    target: ConsolidationTarget,
+    source?: 'suggestion' | 'manual'
+  ) => void
   clearTarget: (familyId: string) => void
-
-  /** Manually set the planning status (e.g. in-progress while editing). */
   setStatus: (familyId: string, status: PlanningStatus) => void
-
-  /** Toggle user approval on a planned entry. */
   setApproved: (familyId: string, approved: boolean) => void
+  resetAll: () => void
 }
 
 function emptyPlan(): MigrationPlan {
@@ -41,13 +34,16 @@ export const useMigrationStore = create<MigrationState>((set, get) => ({
   initPlan: (families) => {
     const now = Date.now()
     const existing = get().plan.entries
-
     const entries: Record<string, MigrationEntry> = {}
+
     for (const family of families) {
       entries[family.id] = existing[family.id] ?? {
         familyId: family.id,
-        status: 'unreviewed',
+        // Sprint 5: initial status is always needs-review.
+        // The planning page upgrades to suggestions-available via useEffect.
+        status: 'needs-review',
         target: null,
+        acceptedViaSuggestion: false,
         userApproved: false,
         affectedSignatures: family.signatureCount,
         affectedLayers: family.totalLayers,
@@ -68,18 +64,31 @@ export const useMigrationStore = create<MigrationState>((set, get) => ({
   setStrategy: (strategy) =>
     set((s) => ({ plan: { ...s.plan, strategy, updatedAt: Date.now() } })),
 
-  setTarget: (familyId, target) =>
+  setTarget: (familyId, target, source = 'manual') =>
     set((s) => {
       const entry = s.plan.entries[familyId]
       if (!entry) return s
-      const status: PlanningStatus = target.type === 'skip' ? 'skipped' : 'planned'
+
+      const wasPlannedViaSuggestion = entry.acceptedViaSuggestion
+      const isManualEdit = source === 'manual' && wasPlannedViaSuggestion
+      const status: PlanningStatus =
+        target.type === 'skip' ? 'skipped'
+        : isManualEdit ? 'modified'
+        : 'planned'
+
       return {
         plan: {
           ...s.plan,
           updatedAt: Date.now(),
           entries: {
             ...s.plan.entries,
-            [familyId]: { ...entry, target, status, userApproved: false },
+            [familyId]: {
+              ...entry,
+              target,
+              status,
+              acceptedViaSuggestion: source === 'suggestion',
+              userApproved: false,
+            },
           },
         },
       }
@@ -95,7 +104,13 @@ export const useMigrationStore = create<MigrationState>((set, get) => ({
           updatedAt: Date.now(),
           entries: {
             ...s.plan.entries,
-            [familyId]: { ...entry, target: null, status: 'in-progress', userApproved: false },
+            [familyId]: {
+              ...entry,
+              target: null,
+              status: 'needs-review',
+              acceptedViaSuggestion: false,
+              userApproved: false,
+            },
           },
         },
       }
@@ -126,4 +141,18 @@ export const useMigrationStore = create<MigrationState>((set, get) => ({
         },
       }
     }),
+
+  resetAll: () =>
+    set((s) => ({
+      plan: {
+        ...s.plan,
+        updatedAt: Date.now(),
+        entries: Object.fromEntries(
+          Object.entries(s.plan.entries).map(([id, e]) => [
+            id,
+            { ...e, target: null, status: 'needs-review' as PlanningStatus, acceptedViaSuggestion: false, userApproved: false },
+          ])
+        ),
+      },
+    })),
 }))
