@@ -1,5 +1,5 @@
 import {
-  LayoutDashboard, Type, Layers, GitBranch, GitMerge, Play, Settings,
+  LayoutDashboard, Type, Layers, GitBranch, GitMerge, Play, FlaskConical, Settings,
 } from 'lucide-react'
 import { cn } from '../../lib/cn'
 import { useUIStore, type AppPage } from '../../store/ui'
@@ -21,7 +21,8 @@ const WORKSPACE_NAV: NavItem[] = [
 ]
 
 const MIGRATION_NAV: NavItem[] = [
-  { id: 'preview',  label: 'Migration Preview',   icon: GitMerge, available: true,  requiresScan: true },
+  { id: 'preview',    label: 'Migration Preview',  icon: GitMerge,    available: true, requiresScan: true },
+  { id: 'simulation', label: 'Simulation',         icon: FlaskConical, available: true, requiresScan: true },
 ]
 
 const DISABLED_NAV = [
@@ -65,16 +66,12 @@ export function Sidebar() {
       </div>
 
       <nav className="flex-1 overflow-y-auto py-2 px-2">
-        {/* Discovery + Planning */}
-        <p className="px-2 py-1.5 text-2xs font-semibold text-ink-disabled uppercase tracking-widest">Workspace</p>
+        <p className="px-2 py-1.5 text-2xs font-semibold text-ink-disabled uppercase tracking-widest">Discovery & Planning</p>
         {WORKSPACE_NAV.map(navButton)}
 
-        {/* Migration */}
         <div className="my-2 mx-2 border-t border-border-subtle" />
         <p className="px-2 py-1 text-2xs font-semibold text-ink-disabled uppercase tracking-widest">Migration</p>
         {MIGRATION_NAV.map(navButton)}
-
-        {/* Disabled */}
         {DISABLED_NAV.map(item => {
           const Icon = item.icon
           return (
