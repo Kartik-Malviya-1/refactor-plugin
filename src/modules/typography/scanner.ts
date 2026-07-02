@@ -16,11 +16,10 @@ export const _scanTimings = {
 }
 
 // How many nodes to sample for the before/after micro-benchmark.
-// Small enough not to distort the profiler; large enough to be meaningful.
 const BENCH_SAMPLE = 20
 
 // ---------------------------------------------------------------------------
-// Tree traversal (unchanged)
+// Tree traversal
 // ---------------------------------------------------------------------------
 
 function findTextNodes(node: BaseNode, results: TextNode[] = []): TextNode[] {
@@ -38,47 +37,40 @@ function findTextNodes(node: BaseNode, results: TextNode[] = []): TextNode[] {
 
 // ---------------------------------------------------------------------------
 // BASELINE extractor — original double-access pattern.
-//
-// Kept here so the micro-benchmark can measure the real before/after delta
-// on the same nodes, in the same environment, in the same run.
-// NOT used for the actual scan; only called by the benchmark loop.
-//
-// The problem: every property is evaluated twice in the non-mixed path —
-// once for `=== figma.mixed` and once to read the value. Each evaluation
-// is a synchronous IPC call from the plugin sandbox to the Figma main thread.
+// Not used for the actual scan; only called by the benchmark loop.
 // ---------------------------------------------------------------------------
 
 function extractPropertiesBaseline(node: TextNode): TypographyProperties | null {
   try {
     const fontName: FontName =
-      node.fontName === figma.mixed          // IPC call 1
+      node.fontName === figma.mixed
         ? (node.getRangeFontName(0, 1) as FontName)
-        : (node.fontName as FontName)        // IPC call 2 (redundant)
+        : (node.fontName as FontName)
 
     const fontSize: number =
-      node.fontSize === figma.mixed          // IPC call 3
+      node.fontSize === figma.mixed
         ? (node.getRangeFontSize(0, 1) as number)
-        : (node.fontSize as number)          // IPC call 4 (redundant)
+        : (node.fontSize as number)
 
     const rawLH: LineHeight =
-      node.lineHeight === figma.mixed        // IPC call 5
+      node.lineHeight === figma.mixed
         ? (node.getRangeLineHeight(0, 1) as LineHeight)
-        : (node.lineHeight as LineHeight)    // IPC call 6 (redundant)
+        : (node.lineHeight as LineHeight)
 
     const rawLS: LetterSpacing =
-      node.letterSpacing === figma.mixed     // IPC call 7
+      node.letterSpacing === figma.mixed
         ? (node.getRangeLetterSpacing(0, 1) as LetterSpacing)
-        : (node.letterSpacing as LetterSpacing) // IPC call 8 (redundant)
+        : (node.letterSpacing as LetterSpacing)
 
     const rawTC: TextCase =
-      node.textCase === figma.mixed          // IPC call 9
+      node.textCase === figma.mixed
         ? (node.getRangeTextCase(0, 1) as TextCase)
-        : (node.textCase as TextCase)        // IPC call 10 (redundant)
+        : (node.textCase as TextCase)
 
     const rawTD: TextDecoration =
-      node.textDecoration === figma.mixed    // IPC call 11
+      node.textDecoration === figma.mixed
         ? (node.getRangeTextDecoration(0, 1) as TextDecoration)
-        : (node.textDecoration as TextDecoration) // IPC call 12 (redundant)
+        : (node.textDecoration as TextDecoration)
 
     const lineHeight: NormalizedLineHeight =
       rawLH.unit === 'AUTO'
@@ -107,23 +99,16 @@ function extractPropertiesBaseline(node: TextNode): TypographyProperties | null 
 
 // ---------------------------------------------------------------------------
 // OPTIMISED extractor — single property access per field.
-//
-// Fix: cache each node.property into a local variable before the
-// figma.mixed guard. The non-mixed path (the vast majority of text nodes)
-// now makes 1 IPC call per field instead of 2.
-//
-// For 400 nodes: 400 × 6 fields × 1 saved call = 2,400 fewer IPC round-trips.
 // ---------------------------------------------------------------------------
 
 function extractProperties(node: TextNode): TypographyProperties | null {
   try {
-    // Read each property once; reuse the cached JS value for the guard.
-    const rawFontName = node.fontName         // 1 IPC call (was 2)
-    const rawFontSize = node.fontSize         // 1 IPC call (was 2)
-    const rawLH       = node.lineHeight       // 1 IPC call (was 2)
-    const rawLS       = node.letterSpacing    // 1 IPC call (was 2)
-    const rawTC       = node.textCase         // 1 IPC call (was 2)
-    const rawTD       = node.textDecoration   // 1 IPC call (was 2)
+    const rawFontName = node.fontName
+    const rawFontSize = node.fontSize
+    const rawLH       = node.lineHeight
+    const rawLS       = node.letterSpacing
+    const rawTC       = node.textCase
+    const rawTD       = node.textDecoration
 
     const fontName: FontName = rawFontName === figma.mixed
       ? (node.getRangeFontName(0, 1) as FontName)
@@ -174,17 +159,15 @@ function extractProperties(node: TextNode): TypographyProperties | null {
   }
 }
 
-function findPageForNode(nodeId: string): { pageId: string; pageName: string } {
-  for (const page of figma.root.children) {
-    const found = page.findOne((n: BaseNode) => n.id === nodeId)
-    if (found) return { pageId: page.id, pageName: page.name }
-  }
-  return { pageId: figma.currentPage.id, pageName: figma.currentPage.name }
-}
-
 // ---------------------------------------------------------------------------
 // Public scanner
 // ---------------------------------------------------------------------------
+
+// Page info resolved during traversal for 'file' scope.
+// Keyed by node.id — populated once during collection, read in O(1)
+// during extraction. Replaces the former findPageForNode() which called
+// page.findOne() per text node, producing O(N²) behaviour.
+type PageInfo = { pageId: string; pageName: string }
 
 export async function scanTypography(
   scope: ScanScope,
@@ -196,6 +179,10 @@ export async function scanTypography(
   const tTraversalStart = Date.now()
 
   const textNodes: TextNode[] = []
+
+  // Built during file-scope traversal; empty for selection/page scope.
+  // Avoids calling page.findOne() per node during extraction.
+  const nodeToPage = new Map<string, PageInfo>()
 
   if (scope === 'selection') {
     const sel = figma.currentPage.selection
@@ -212,6 +199,7 @@ export async function scanTypography(
   } else if (scope === 'page') {
     findTextNodes(figma.currentPage, textNodes)
   } else {
+    // file scope: load all pages, then tag each collected node with its page.
     await figma.loadAllPagesAsync()
     for (const page of figma.root.children) {
       onProgress?.({
@@ -220,7 +208,17 @@ export async function scanTypography(
         phase: 'collecting',
         label: `Loading page "${page.name}"…`,
       })
+
+      // Record the index before collection so we know which nodes are new.
+      const countBefore = textNodes.length
       findTextNodes(page, textNodes)
+
+      // Tag every newly collected node with this page's info in O(1).
+      // This single pass replaces the former O(N²) findPageForNode() search.
+      const pageInfo: PageInfo = { pageId: page.id, pageName: page.name }
+      for (let i = countBefore; i < textNodes.length; i++) {
+        nodeToPage.set(textNodes[i].id, pageInfo)
+      }
     }
   }
 
@@ -228,8 +226,6 @@ export async function scanTypography(
   _scanTimings.nodeCount = textNodes.length
 
   // ── Before/After micro-benchmark ─────────────────────────────────────────
-  // Runs both extractors on the same BENCH_SAMPLE nodes so the console output
-  // shows a measured before/after on real data from this file, not estimates.
   const sampleN = Math.min(BENCH_SAMPLE, textNodes.length)
 
   const tBenchOld = Date.now()
@@ -263,11 +259,14 @@ export async function scanTypography(
     }
 
     const node = textNodes[i]
-    const props = extractProperties(node)   // <─ optimised path
+    const props = extractProperties(node)
     if (!props) continue
 
-    const pageId = scope === 'file' ? findPageForNode(node.id).pageId : currentPageId
-    const pageName = scope === 'file' ? findPageForNode(node.id).pageName : currentPageName
+    // O(1) map lookup — replaces two O(N²) findPageForNode() calls.
+    const { pageId, pageName } =
+      scope === 'file'
+        ? (nodeToPage.get(node.id) ?? { pageId: currentPageId, pageName: currentPageName })
+        : { pageId: currentPageId, pageName: currentPageName }
 
     let parentName: string | undefined
     if (node.parent && node.parent.type !== 'PAGE') {
