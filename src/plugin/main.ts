@@ -1,17 +1,14 @@
 import { registerModule, registerAdapter, getAdapter } from '../engine/registry'
 import { scanEngine } from '../engine/core'
+import { _traversalInstrument } from '../engine/traversal'
+import { _grouperInstrument } from '../engine/grouper'
 import { typographyModule } from '../modules/typography/index'
 import { typographyScannerAdapter } from '../modules/typography/adapter'
+import { _extractionInstrument, resetExtractionInstrument } from '../modules/typography/scanner'
 import { runAllBenchmarks } from '../benchmarks/runner'
 import type { UIToPluginMessage, PluginToUIMessage } from '../shared/messages'
 import type { AuditResult } from '../shared/types'
 
-// ---------------------------------------------------------------------------
-// Registration
-// Every new module requires two lines here:
-//   registerModule()  — metadata + AuditModule interface (UI catalog)
-//   registerAdapter() — ScannerAdapter for the Core Scan Engine
-// ---------------------------------------------------------------------------
 registerModule(typographyModule)
 registerAdapter(typographyScannerAdapter)
 
@@ -28,7 +25,7 @@ function send(msg: PluginToUIMessage): void {
 }
 
 // ---------------------------------------------------------------------------
-// Profiler output
+// Formatting helpers
 // ---------------------------------------------------------------------------
 
 function fmtMs(ms: number): string {
@@ -37,31 +34,147 @@ function fmtMs(ms: number): string {
   return `${ms}ms`
 }
 
-interface ProfileStage { name: string; ms: number }
+function fmtN(n: number): string {
+  return n.toLocaleString()
+}
 
-function printScanProfile(stages: ProfileStage[], totalMs: number): void {
-  const NAME_COL = 16
-  const VAL_COL  = 9
+function fmtRate(items: number, ms: number): string {
+  if (ms <= 0) return '        —'
+  const r = Math.round((items / ms) * 1000)
+  if (r >= 1_000_000) return `${(r / 1_000_000).toFixed(1)}M/s`
+  if (r >= 1_000)     return `${Math.round(r / 1_000)}K/s`
+  return `${r}/s`
+}
 
-  function row(name: string, ms: number): string {
-    const dots = '.'.repeat(Math.max(1, NAME_COL - name.length + 1))
-    const val  = fmtMs(ms).padStart(VAL_COL)
-    const pct  = totalMs > 0
-      ? `${((ms / totalMs) * 100).toFixed(1).padStart(5)}%`
-      : '  0.0%'
-    return `  ${name} ${dots} ${val}   ${pct}`
+function pct(ms: number, totalMs: number): string {
+  if (totalMs <= 0) return '   0.0%'
+  return `${((ms / totalMs) * 100).toFixed(1).padStart(5)}%`
+}
+
+// ---------------------------------------------------------------------------
+// Detailed instrumentation report
+//
+// Prints after every scan. Shows all 11 stages with duration, percentage,
+// item count, throughput, and raw counters.
+// ---------------------------------------------------------------------------
+
+function printDetailedReport(
+  totalMs: number,
+  serialMs: number,
+  msgMs: number,
+  scope: string,
+  groupCount: number
+): void {
+  const ti = _traversalInstrument
+  const ei = _extractionInstrument
+  const gi = _grouperInstrument
+  const t  = scanEngine.timings
+
+  const N = ti.itemsExtracted   // items that passed extraction
+  const V = ti.nodesVisited     // total DFS nodes
+
+  // Per-property totals
+  const propTotalMs = ei.fontNameMs + ei.fontSizeMs + ei.lineHeightMs +
+                      ei.letterSpacingMs + ei.textCaseMs + ei.textDecorationMs
+  const totalIpcAccesses = ei.fontNameAccesses + ei.fontSizeAccesses +
+                           ei.lineHeightAccesses + ei.letterSpacingAccesses +
+                           ei.textCaseAccesses + ei.textDecorationAccesses
+  const totalRangeCalls = ei.getRangeFontNameCalls + ei.getRangeFontSizeCalls +
+                          ei.getRangeLineHeightCalls + ei.getRangeLetterSpacingCalls +
+                          ei.getRangeTextCaseCalls + ei.getRangeTextDecorationCalls
+
+  const W = 76
+  const line = '═'.repeat(W)
+  const mid  = '─'.repeat(W)
+
+  function row(
+    num: string, label: string, ms: number,
+    items: number, itemLabel = ''
+  ): void {
+    const d = fmtMs(ms).padStart(9)
+    const p = pct(ms, totalMs)
+    const n = items > 0 ? fmtN(items).padStart(9) : '        —'
+    const r = items > 0 ? fmtRate(items, ms).padStart(12) : '           —'
+    const lbl = (num + '  ' + label).padEnd(30)
+    console.log(`  ${lbl}${d}   ${p}  ${n}  ${r}  ${itemLabel}`)
   }
 
-  const divider = '  ' + '─'.repeat(NAME_COL + VAL_COL + 12)
-
   console.log('')
-  console.log('  ┌─ Refactor Scan Profile ─────────────────────┐')
-  for (const s of stages) console.log(row(s.name, s.ms))
-  console.log(divider)
-  console.log(row('Total', totalMs))
-  console.log('  └' + '─'.repeat(NAME_COL + VAL_COL + 13) + '┘')
-  console.log(`  Nodes scanned:   ${scanEngine.timings.nodeCount}`)
-  console.log(`  Progress events: ${scanEngine.timings.progressEventCount}`)
+  console.log(`  ╔${line}╗`)
+  console.log(`  ║  Refactor — Detailed Scan Instrumentation Report${' '.repeat(W - 50)}║`)
+  console.log(`  ╠${line}╣`)
+  console.log(`  ║  Scope: ${scope.padEnd(14)}  Nodes scanned: ${fmtN(ti.nodesMatched).padEnd(10)}  Total: ${fmtMs(totalMs)}${' '.repeat(Math.max(0, W - 56 - fmtMs(totalMs).length))}║`)
+  console.log(`  ╠${line}╣`)
+  console.log(`  ║  ${'#   Stage'.padEnd(30)}${'Duration'.padStart(9)}   ${'% Total'.padStart(7)}  ${'Items'.padStart(9)}  ${'Throughput'.padStart(12)}  ║`)
+  console.log(`  ╠${mid}╣`)
+
+  row('1', 'Document traversal',   ti.traversalMs,       V,      'nodes visited')
+  row('2', 'Page lookup',          ti.pageLookupMs,       ti.pageLookupCount, 'lookups')
+  row('3', 'Parent access',        ti.parentAccessMs,     ti.parentAccessCount, 'accesses')
+  row('4', 'Text extraction total', ti.extractionCallMs,  N,      'nodes')
+
+  // Stage 4 breakdown: per-property IPC timing
+  console.log(`  ║  ${''.padEnd(30)}${'─'.repeat(44)}║`)
+  console.log(`  ║  ${'    ├ fontName'.padEnd(30)}${fmtMs(ei.fontNameMs).padStart(9)}   ${pct(ei.fontNameMs, totalMs)}  ${fmtN(ei.fontNameAccesses).padStart(9)}  ${fmtRate(ei.fontNameAccesses, ei.fontNameMs).padStart(12)}  IPC/node║`)
+  console.log(`  ║  ${'    ├ fontSize'.padEnd(30)}${fmtMs(ei.fontSizeMs).padStart(9)}   ${pct(ei.fontSizeMs, totalMs)}  ${fmtN(ei.fontSizeAccesses).padStart(9)}  ${fmtRate(ei.fontSizeAccesses, ei.fontSizeMs).padStart(12)}  IPC/node║`)
+  console.log(`  ║  ${'    ├ lineHeight'.padEnd(30)}${fmtMs(ei.lineHeightMs).padStart(9)}   ${pct(ei.lineHeightMs, totalMs)}  ${fmtN(ei.lineHeightAccesses).padStart(9)}  ${fmtRate(ei.lineHeightAccesses, ei.lineHeightMs).padStart(12)}  IPC/node║`)
+  console.log(`  ║  ${'    ├ letterSpacing'.padEnd(30)}${fmtMs(ei.letterSpacingMs).padStart(9)}   ${pct(ei.letterSpacingMs, totalMs)}  ${fmtN(ei.letterSpacingAccesses).padStart(9)}  ${fmtRate(ei.letterSpacingAccesses, ei.letterSpacingMs).padStart(12)}  IPC/node║`)
+  console.log(`  ║  ${'    ├ textCase'.padEnd(30)}${fmtMs(ei.textCaseMs).padStart(9)}   ${pct(ei.textCaseMs, totalMs)}  ${fmtN(ei.textCaseAccesses).padStart(9)}  ${fmtRate(ei.textCaseAccesses, ei.textCaseMs).padStart(12)}  IPC/node║`)
+  console.log(`  ║  ${'    └ textDecoration'.padEnd(30)}${fmtMs(ei.textDecorationMs).padStart(9)}   ${pct(ei.textDecorationMs, totalMs)}  ${fmtN(ei.textDecorationAccesses).padStart(9)}  ${fmtRate(ei.textDecorationAccesses, ei.textDecorationMs).padStart(12)}  IPC/node║`)
+  console.log(`  ║  ${'    Total IPC prop reads'.padEnd(30)}${fmtMs(propTotalMs).padStart(9)}   ${pct(propTotalMs, totalMs)}  ${fmtN(totalIpcAccesses).padStart(9)}  ${fmtRate(totalIpcAccesses, propTotalMs).padStart(12)}  calls   ║`)
+  console.log(`  ╠${mid}╣`)
+
+  row('5', 'Typography normalization', gi.normalizationMs, gi.normalizationCount, 'items')
+  row('6', 'Bucket insertion',          gi.bucketInsertMs,  gi.normalizationCount, 'items')
+  row('7', 'Grouping total',            t.groupingMs,       N,      'items')
+  row('8', 'Sorting',                   t.sortingMs,        groupCount, 'groups')
+  row('9', 'Serialization',             serialMs,           N,      'items')
+  row('10', 'UI messaging',             msgMs,              0,      '')
+
+  console.log(`  ╠${mid}╣`)
+  console.log(`  ║  ${'11  Total'.padEnd(30)}${fmtMs(totalMs).padStart(9)}   100.0%                            ║`)
+  console.log(`  ╠${line}╣`)
+
+  // Counters section
+  console.log(`  ║  Counters${' '.repeat(W - 9)}║`)
+  console.log(`  ╠${mid}╣`)
+
+  function counter(label: string, value: number, note = ''): void {
+    const v = fmtN(value).padStart(12)
+    const n = note ? `   ${note}` : ''
+    console.log(`  ║  ${label.padEnd(36)}${v}${n.padEnd(W - 36 - 12 - 2)}║`)
+  }
+
+  counter('Nodes visited (DFS total):',          V)
+  counter('Text nodes found:',                    ti.nodesMatched)
+  counter('Items extracted (non-null):',          ti.itemsExtracted)
+  counter('Page lookups (Map.get):',              ti.pageLookupCount)
+  counter('Parent traversals (node.parent):',     ti.parentAccessCount)
+  counter('fontName IPC accesses:',              ei.fontNameAccesses)
+  counter('fontSize IPC accesses:',              ei.fontSizeAccesses)
+  counter('lineHeight IPC accesses:',            ei.lineHeightAccesses)
+  counter('letterSpacing IPC accesses:',         ei.letterSpacingAccesses)
+  counter('textCase IPC accesses:',              ei.textCaseAccesses)
+  counter('textDecoration IPC accesses:',        ei.textDecorationAccesses)
+  counter('getRangeFontName() calls:',            ei.getRangeFontNameCalls,   totalRangeCalls === 0 ? '(0 mixed nodes)' : '')
+  counter('getRangeFontSize() calls:',            ei.getRangeFontSizeCalls)
+  counter('getRangeLineHeight() calls:',          ei.getRangeLineHeightCalls)
+  counter('getRangeLetterSpacing() calls:',       ei.getRangeLetterSpacingCalls)
+  counter('getRangeTextCase() calls:',            ei.getRangeTextCaseCalls)
+  counter('getRangeTextDecoration() calls:',      ei.getRangeTextDecorationCalls)
+  counter('sharedPluginData accesses:',           ei.sharedPluginDataAccesses, '(not implemented)')
+  counter('Variable lookups:',                    ei.variableLookups,          '(not implemented)')
+  counter('Progress updates sent:',               ti.progressUpdateCount)
+
+  console.log(`  ╠${mid}╣`)
+
+  // Per-node averages
+  const avgTotalMs    = N > 0 ? (totalMs / N).toFixed(3) : '0'
+  const avgExtractMs  = N > 0 ? (ti.extractionCallMs / N).toFixed(3) : '0'
+  const avgIpcMs      = totalIpcAccesses > 0 ? (propTotalMs / totalIpcAccesses).toFixed(3) : '0'
+  console.log(`  ║  Avg per node:  ${avgTotalMs}ms total  │  ${avgExtractMs}ms extraction  │  ${avgIpcMs}ms/IPC call${' '.repeat(Math.max(0, W - 61 - avgTotalMs.length - avgExtractMs.length - avgIpcMs.length))}║`)
+
+  console.log(`  ╚${line}╝`)
   console.log('')
 }
 
@@ -70,10 +183,6 @@ function printScanProfile(stages: ProfileStage[], totalMs: number): void {
 // ---------------------------------------------------------------------------
 
 figma.ui.onmessage = async (rawMsg: unknown) => {
-  // ── Developer-only: benchmark runner ─────────────────────────────────────
-  // Not part of UIToPluginMessage. Not exposed in any production UI.
-  // Trigger from the Figma developer console:
-  //   figma.ui.postMessage({ type: 'RUN_BENCHMARKS' })
   if ((rawMsg as { type?: string }).type === 'RUN_BENCHMARKS') {
     await runAllBenchmarks()
     return
@@ -113,6 +222,10 @@ figma.ui.onmessage = async (rawMsg: unknown) => {
       scanCancelled = false
       const tTotal = Date.now()
 
+      // Reset typography extraction instrument before the scan begins.
+      // (traversal and grouper instruments auto-reset inside their functions.)
+      resetExtractionInstrument()
+
       send({ type: 'SCAN_STARTED', payload: { moduleId, scope } })
 
       try {
@@ -151,19 +264,8 @@ figma.ui.onmessage = async (rawMsg: unknown) => {
         const msgMs = Date.now() - tMsg
 
         const totalMs = Date.now() - tTotal
-        const t = scanEngine.timings
 
-        printScanProfile(
-          [
-            { name: 'Traversal',     ms: t.traversalMs },
-            { name: 'Extraction',    ms: t.extractionMs },
-            { name: 'Normalization', ms: t.groupingMs },
-            { name: 'Sorting',       ms: t.sortingMs },
-            { name: 'Construction',  ms: serialMs },
-            { name: 'Messaging',     ms: msgMs },
-          ],
-          totalMs
-        )
+        printDetailedReport(totalMs, serialMs, msgMs, scopeLabel, groups.length)
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err)
         send({ type: 'SCAN_ERROR', payload: { error: message } })
