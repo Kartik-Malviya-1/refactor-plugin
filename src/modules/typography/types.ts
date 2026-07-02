@@ -1,0 +1,32 @@
+// Typography-specific properties. Fully JSON-serializable.
+
+export interface NormalizedLineHeight {
+  unit: 'AUTO' | 'PIXELS' | 'PERCENT'
+  value: number
+}
+
+export interface NormalizedLetterSpacing {
+  unit: 'PIXELS' | 'PERCENT'
+  value: number
+}
+
+export type NormalizedTextCase =
+  | 'ORIGINAL'
+  | 'UPPER'
+  | 'LOWER'
+  | 'TITLE'
+  | 'SMALL_CAPS'
+  | 'SMALL_CAPS_FORCED'
+
+export type NormalizedTextDecoration = 'NONE' | 'UNDERLINE' | 'STRIKETHROUGH'
+
+export interface TypographyProperties {
+  fontFamily: string
+  fontStyle: string
+  fontWeight: number
+  fontSize: number
+  lineHeight: NormalizedLineHeight
+  letterSpacing: NormalizedLetterSpacing
+  textCase: NormalizedTextCase
+  textDecoration: NormalizedTextDecoration
+}
