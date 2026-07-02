@@ -5,6 +5,7 @@ import { _grouperInstrument } from '../engine/grouper'
 import { typographyModule } from '../modules/typography/index'
 import { typographyScannerAdapter } from '../modules/typography/adapter'
 import { _extractionInstrument, resetExtractionInstrument } from '../modules/typography/scanner'
+import { navigateToLocations } from './navigation'
 import { runAllBenchmarks } from '../benchmarks/runner'
 import type { UIToPluginMessage, PluginToUIMessage } from '../shared/messages'
 import type { AuditResult } from '../shared/types'
@@ -34,9 +35,7 @@ function fmtMs(ms: number): string {
   return `${ms}ms`
 }
 
-function fmtN(n: number): string {
-  return n.toLocaleString()
-}
+function fmtN(n: number): string { return n.toLocaleString() }
 
 function fmtRate(items: number, ms: number): string {
   if (ms <= 0) return '        —'
@@ -53,9 +52,6 @@ function pct(ms: number, totalMs: number): string {
 
 // ---------------------------------------------------------------------------
 // Detailed instrumentation report
-//
-// Prints after every scan. Shows all 11 stages with duration, percentage,
-// item count, throughput, and raw counters.
 // ---------------------------------------------------------------------------
 
 function printDetailedReport(
@@ -70,10 +66,9 @@ function printDetailedReport(
   const gi = _grouperInstrument
   const t  = scanEngine.timings
 
-  const N = ti.itemsExtracted   // items that passed extraction
-  const V = ti.nodesVisited     // total DFS nodes
+  const N = ti.itemsExtracted
+  const V = ti.nodesVisited
 
-  // Per-property totals
   const propTotalMs = ei.fontNameMs + ei.fontSizeMs + ei.lineHeightMs +
                       ei.letterSpacingMs + ei.textCaseMs + ei.textDecorationMs
   const totalIpcAccesses = ei.fontNameAccesses + ei.fontSizeAccesses +
@@ -87,10 +82,7 @@ function printDetailedReport(
   const line = '═'.repeat(W)
   const mid  = '─'.repeat(W)
 
-  function row(
-    num: string, label: string, ms: number,
-    items: number, itemLabel = ''
-  ): void {
+  function row(num: string, label: string, ms: number, items: number, itemLabel = ''): void {
     const d = fmtMs(ms).padStart(9)
     const p = pct(ms, totalMs)
     const n = items > 0 ? fmtN(items).padStart(9) : '        —'
@@ -108,12 +100,11 @@ function printDetailedReport(
   console.log(`  ║  ${'#   Stage'.padEnd(30)}${'Duration'.padStart(9)}   ${'% Total'.padStart(7)}  ${'Items'.padStart(9)}  ${'Throughput'.padStart(12)}  ║`)
   console.log(`  ╠${mid}╣`)
 
-  row('1', 'Document traversal',   ti.traversalMs,       V,      'nodes visited')
-  row('2', 'Page lookup',          ti.pageLookupMs,       ti.pageLookupCount, 'lookups')
-  row('3', 'Parent access',        ti.parentAccessMs,     ti.parentAccessCount, 'accesses')
-  row('4', 'Text extraction total', ti.extractionCallMs,  N,      'nodes')
+  row('1',  'Document traversal',      ti.traversalMs,      V, 'nodes visited')
+  row('2',  'Page lookup',             ti.pageLookupMs,     ti.pageLookupCount, 'lookups')
+  row('3',  'Parent access',           ti.parentAccessMs,   ti.parentAccessCount, 'accesses')
+  row('4',  'Text extraction total',   ti.extractionCallMs, N, 'nodes')
 
-  // Stage 4 breakdown: per-property IPC timing
   console.log(`  ║  ${''.padEnd(30)}${'─'.repeat(44)}║`)
   console.log(`  ║  ${'    ├ fontName'.padEnd(30)}${fmtMs(ei.fontNameMs).padStart(9)}   ${pct(ei.fontNameMs, totalMs)}  ${fmtN(ei.fontNameAccesses).padStart(9)}  ${fmtRate(ei.fontNameAccesses, ei.fontNameMs).padStart(12)}  IPC/node║`)
   console.log(`  ║  ${'    ├ fontSize'.padEnd(30)}${fmtMs(ei.fontSizeMs).padStart(9)}   ${pct(ei.fontSizeMs, totalMs)}  ${fmtN(ei.fontSizeAccesses).padStart(9)}  ${fmtRate(ei.fontSizeAccesses, ei.fontSizeMs).padStart(12)}  IPC/node║`)
@@ -124,18 +115,16 @@ function printDetailedReport(
   console.log(`  ║  ${'    Total IPC prop reads'.padEnd(30)}${fmtMs(propTotalMs).padStart(9)}   ${pct(propTotalMs, totalMs)}  ${fmtN(totalIpcAccesses).padStart(9)}  ${fmtRate(totalIpcAccesses, propTotalMs).padStart(12)}  calls   ║`)
   console.log(`  ╠${mid}╣`)
 
-  row('5', 'Typography normalization', gi.normalizationMs, gi.normalizationCount, 'items')
-  row('6', 'Bucket insertion',          gi.bucketInsertMs,  gi.normalizationCount, 'items')
-  row('7', 'Grouping total',            t.groupingMs,       N,      'items')
-  row('8', 'Sorting',                   t.sortingMs,        groupCount, 'groups')
-  row('9', 'Serialization',             serialMs,           N,      'items')
-  row('10', 'UI messaging',             msgMs,              0,      '')
+  row('5',  'Typography normalization', gi.normalizationMs,  gi.normalizationCount, 'items')
+  row('6',  'Bucket insertion',         gi.bucketInsertMs,   gi.normalizationCount, 'items')
+  row('7',  'Grouping total',           t.groupingMs,        N,          'items')
+  row('8',  'Sorting',                  t.sortingMs,         groupCount, 'groups')
+  row('9',  'Serialization',            serialMs,            N,          'items')
+  row('10', 'UI messaging',             msgMs,               0,          '')
 
   console.log(`  ╠${mid}╣`)
   console.log(`  ║  ${'11  Total'.padEnd(30)}${fmtMs(totalMs).padStart(9)}   100.0%                            ║`)
   console.log(`  ╠${line}╣`)
-
-  // Counters section
   console.log(`  ║  Counters${' '.repeat(W - 9)}║`)
   console.log(`  ╠${mid}╣`)
 
@@ -145,35 +134,32 @@ function printDetailedReport(
     console.log(`  ║  ${label.padEnd(36)}${v}${n.padEnd(W - 36 - 12 - 2)}║`)
   }
 
-  counter('Nodes visited (DFS total):',          V)
-  counter('Text nodes found:',                    ti.nodesMatched)
-  counter('Items extracted (non-null):',          ti.itemsExtracted)
-  counter('Page lookups (Map.get):',              ti.pageLookupCount)
-  counter('Parent traversals (node.parent):',     ti.parentAccessCount)
-  counter('fontName IPC accesses:',              ei.fontNameAccesses)
-  counter('fontSize IPC accesses:',              ei.fontSizeAccesses)
-  counter('lineHeight IPC accesses:',            ei.lineHeightAccesses)
-  counter('letterSpacing IPC accesses:',         ei.letterSpacingAccesses)
-  counter('textCase IPC accesses:',              ei.textCaseAccesses)
-  counter('textDecoration IPC accesses:',        ei.textDecorationAccesses)
-  counter('getRangeFontName() calls:',            ei.getRangeFontNameCalls,   totalRangeCalls === 0 ? '(0 mixed nodes)' : '')
-  counter('getRangeFontSize() calls:',            ei.getRangeFontSizeCalls)
-  counter('getRangeLineHeight() calls:',          ei.getRangeLineHeightCalls)
-  counter('getRangeLetterSpacing() calls:',       ei.getRangeLetterSpacingCalls)
-  counter('getRangeTextCase() calls:',            ei.getRangeTextCaseCalls)
-  counter('getRangeTextDecoration() calls:',      ei.getRangeTextDecorationCalls)
-  counter('sharedPluginData accesses:',           ei.sharedPluginDataAccesses, '(not implemented)')
-  counter('Variable lookups:',                    ei.variableLookups,          '(not implemented)')
-  counter('Progress updates sent:',               ti.progressUpdateCount)
+  counter('Nodes visited (DFS total):',         V)
+  counter('Text nodes found:',                   ti.nodesMatched)
+  counter('Items extracted (non-null):',         ti.itemsExtracted)
+  counter('Page lookups (Map.get):',             ti.pageLookupCount)
+  counter('Parent traversals (node.parent):',    ti.parentAccessCount)
+  counter('fontName IPC accesses:',             ei.fontNameAccesses)
+  counter('fontSize IPC accesses:',             ei.fontSizeAccesses)
+  counter('lineHeight IPC accesses:',           ei.lineHeightAccesses)
+  counter('letterSpacing IPC accesses:',        ei.letterSpacingAccesses)
+  counter('textCase IPC accesses:',             ei.textCaseAccesses)
+  counter('textDecoration IPC accesses:',       ei.textDecorationAccesses)
+  counter('getRangeFontName() calls:',           ei.getRangeFontNameCalls,    totalRangeCalls === 0 ? '(0 mixed nodes)' : '')
+  counter('getRangeFontSize() calls:',           ei.getRangeFontSizeCalls)
+  counter('getRangeLineHeight() calls:',         ei.getRangeLineHeightCalls)
+  counter('getRangeLetterSpacing() calls:',      ei.getRangeLetterSpacingCalls)
+  counter('getRangeTextCase() calls:',           ei.getRangeTextCaseCalls)
+  counter('getRangeTextDecoration() calls:',     ei.getRangeTextDecorationCalls)
+  counter('sharedPluginData accesses:',          ei.sharedPluginDataAccesses, '(not implemented)')
+  counter('Variable lookups:',                   ei.variableLookups,          '(not implemented)')
+  counter('Progress updates sent:',              ti.progressUpdateCount)
 
   console.log(`  ╠${mid}╣`)
-
-  // Per-node averages
-  const avgTotalMs    = N > 0 ? (totalMs / N).toFixed(3) : '0'
-  const avgExtractMs  = N > 0 ? (ti.extractionCallMs / N).toFixed(3) : '0'
-  const avgIpcMs      = totalIpcAccesses > 0 ? (propTotalMs / totalIpcAccesses).toFixed(3) : '0'
-  console.log(`  ║  Avg per node:  ${avgTotalMs}ms total  │  ${avgExtractMs}ms extraction  │  ${avgIpcMs}ms/IPC call${' '.repeat(Math.max(0, W - 61 - avgTotalMs.length - avgExtractMs.length - avgIpcMs.length))}║`)
-
+  const avgTotalMs   = N > 0 ? (totalMs / N).toFixed(3) : '0'
+  const avgExtractMs = N > 0 ? (ti.extractionCallMs / N).toFixed(3) : '0'
+  const avgIpcMs     = totalIpcAccesses > 0 ? (propTotalMs / totalIpcAccesses).toFixed(3) : '0'
+  console.log(`  ║  Avg per node: ${avgTotalMs}ms total  │  ${avgExtractMs}ms extraction  │  ${avgIpcMs}ms/IPC call${' '.repeat(Math.max(0, W - 62 - avgTotalMs.length - avgExtractMs.length - avgIpcMs.length))}║`)
   console.log(`  ╚${line}╝`)
   console.log('')
 }
@@ -198,22 +184,31 @@ figma.ui.onmessage = async (rawMsg: unknown) => {
     }
 
     case 'SELECT_NODES': {
-      const { nodeIds } = msg.payload
-      const nodes: SceneNode[] = []
-      for (const id of nodeIds) {
-        const node = figma.currentPage.findOne((n: BaseNode) => n.id === id)
-        if (node) nodes.push(node as SceneNode)
+      // Uses the shared navigation service which handles cross-page selection.
+      // The UI sends NodeLocation[] (containing pageId) so the service can
+      // switch to the correct page before resolving nodes by ID.
+      const { locations } = msg.payload
+      const outcome = await navigateToLocations(locations)
+
+      if (outcome.ok) {
+        const { selected, pageChanged, pageName, notFound } = outcome.result
+        send({
+          type: 'NODES_SELECTED',
+          payload: { count: selected, pageChanged, pageName, notFound },
+        })
+      } else {
+        send({
+          type: 'NAVIGATION_ERROR',
+          payload: { error: outcome.error.message, code: outcome.error.code },
+        })
       }
-      figma.currentPage.selection = nodes
-      figma.viewport.scrollAndZoomIntoView(nodes)
-      send({ type: 'NODES_SELECTED', payload: { count: nodes.length } })
       break
     }
 
     case 'START_SCAN': {
       const { moduleId, scope } = msg.payload
-
       const adapter = getAdapter(moduleId)
+
       if (!adapter) {
         send({ type: 'SCAN_ERROR', payload: { error: `No adapter registered for module "${moduleId}".` } })
         return
@@ -222,10 +217,7 @@ figma.ui.onmessage = async (rawMsg: unknown) => {
       scanCancelled = false
       const tTotal = Date.now()
 
-      // Reset typography extraction instrument before the scan begins.
-      // (traversal and grouper instruments auto-reset inside their functions.)
       resetExtractionInstrument()
-
       send({ type: 'SCAN_STARTED', payload: { moduleId, scope } })
 
       try {
@@ -264,7 +256,6 @@ figma.ui.onmessage = async (rawMsg: unknown) => {
         const msgMs = Date.now() - tMsg
 
         const totalMs = Date.now() - tTotal
-
         printDetailedReport(totalMs, serialMs, msgMs, scopeLabel, groups.length)
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err)

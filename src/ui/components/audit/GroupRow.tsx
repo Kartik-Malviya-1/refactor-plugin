@@ -7,13 +7,12 @@ import { TypographyPreview } from './TypographyPreview'
 import { Badge } from '../ui/Badge'
 import { formatLineHeight, formatLetterSpacing } from '../../../modules/typography/normalizer'
 import { sendToPlugin } from '../../hooks/useSendMessage'
+import { locationFromItem } from '../../../shared/navigation'
 
 interface GroupRowProps {
   group: AuditGroup<TypographyProperties>
   isSelected: boolean
   isExpanded: boolean
-  // Callbacks accept groupId so the parent can provide stable references
-  // via useCallback without needing to create per-row closures.
   onSelect: (groupId: string) => void
   onToggleExpand: (groupId: string) => void
   rank: number
@@ -21,9 +20,6 @@ interface GroupRowProps {
 
 const COL_WIDTHS = '52px 1fr 80px 58px 70px 72px 64px 36px'
 
-// memo: prevents re-renders when props are reference-equal.
-// Effective because AuditTable passes stable onSelect / onToggleExpand
-// callbacks (useCallback with [] deps reading state via getState()).
 export const GroupRow = memo(function GroupRow({
   group,
   isSelected,
@@ -33,6 +29,20 @@ export const GroupRow = memo(function GroupRow({
   rank,
 }: GroupRowProps) {
   const p = group.descriptor
+
+  function handleSelectAll(e: React.MouseEvent) {
+    e.stopPropagation()
+    // Build NodeLocation[] from group items so the plugin can switch pages.
+    const locations = group.items.map(locationFromItem)
+    sendToPlugin({ type: 'SELECT_NODES', payload: { locations } })
+  }
+
+  function handleSelectItem(item: (typeof group.items)[0]) {
+    sendToPlugin({
+      type: 'SELECT_NODES',
+      payload: { locations: [locationFromItem(item)] },
+    })
+  }
 
   return (
     <>
@@ -60,10 +70,7 @@ export const GroupRow = memo(function GroupRow({
         </div>
         <div className="flex items-center justify-center">
           <button
-            onClick={(e) => {
-              e.stopPropagation()
-              sendToPlugin({ type: 'SELECT_NODES', payload: { nodeIds: group.items.map(i => i.nodeId) } })
-            }}
+            onClick={handleSelectAll}
             className="p-1 rounded text-ink-3 hover:text-accent hover:bg-accent-subtle transition-colors"
             title="Select all in Figma"
           >
@@ -92,8 +99,9 @@ export const GroupRow = memo(function GroupRow({
               {item.parentName && <span className="text-ink-disabled truncate max-w-[120px]">{item.parentName}</span>}
               <span className="text-ink-disabled shrink-0">{item.pageName}</span>
               <button
-                onClick={() => sendToPlugin({ type: 'SELECT_NODES', payload: { nodeIds: [item.nodeId] } })}
+                onClick={() => handleSelectItem(item)}
                 className="shrink-0 text-ink-3 hover:text-accent transition-colors"
+                title="Select in Figma"
               >
                 <MousePointerClick className="w-3 h-3" />
               </button>

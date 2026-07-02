@@ -8,6 +8,7 @@ import { Badge } from '../ui/Badge'
 import { TypographyPreview } from '../audit/TypographyPreview'
 import { sendToPlugin } from '../../hooks/useSendMessage'
 import { useUIStore } from '../../store/ui'
+import { locationFromItem } from '../../../shared/navigation'
 
 interface TypographyInspectorProps {
   group: AuditGroup<TypographyProperties>
@@ -16,6 +17,19 @@ interface TypographyInspectorProps {
 export function TypographyInspector({ group }: TypographyInspectorProps) {
   const { selectGroup } = useUIStore()
   const p = group.descriptor
+
+  function handleSelectAll() {
+    // Build NodeLocation[] so the plugin can switch pages for cross-page layers.
+    const locations = group.items.map(locationFromItem)
+    sendToPlugin({ type: 'SELECT_NODES', payload: { locations } })
+  }
+
+  function handleSelectLayer(item: (typeof group.items)[0]) {
+    sendToPlugin({
+      type: 'SELECT_NODES',
+      payload: { locations: [locationFromItem(item)] },
+    })
+  }
 
   return (
     <aside className="w-[248px] shrink-0 bg-surface-1 border-l border-border flex flex-col h-full overflow-hidden">
@@ -52,8 +66,7 @@ export function TypographyInspector({ group }: TypographyInspectorProps) {
         <div className="px-3 py-2 border-t border-border-subtle">
           <p className="text-2xs font-semibold text-ink-disabled uppercase tracking-widest mb-2">Actions</p>
           <div className="flex flex-col gap-1.5">
-            <Button variant="primary" size="sm" className="w-full justify-start"
-              onClick={() => sendToPlugin({ type: 'SELECT_NODES', payload: { nodeIds: group.items.map(i => i.nodeId) } })}>
+            <Button variant="primary" size="sm" className="w-full justify-start" onClick={handleSelectAll}>
               <MousePointerClick className="w-3.5 h-3.5" />Select All Layers
             </Button>
             <div className="relative">
@@ -85,13 +98,17 @@ export function TypographyInspector({ group }: TypographyInspectorProps) {
             {group.items.map((item) => (
               <button
                 key={item.id}
-                onClick={() => sendToPlugin({ type: 'SELECT_NODES', payload: { nodeIds: [item.nodeId] } })}
+                onClick={() => handleSelectLayer(item)}
                 className="w-full flex items-start gap-2 px-3 py-1.5 hover:bg-surface-hover transition-colors text-left"
+                title={item.pageName !== (group.items[0]?.pageName ?? '') ? `On page: ${item.pageName}` : undefined}
               >
                 <div className="w-1 h-1 rounded-full bg-border-strong shrink-0 mt-1.5" />
                 <div className="flex-1 min-w-0">
                   <p className="text-xs font-medium text-ink truncate">{item.nodeName}</p>
                   {item.parentName && <p className="text-2xs text-ink-3 truncate">{item.parentName}</p>}
+                  {item.pageName && (
+                    <p className="text-2xs text-ink-disabled truncate">{item.pageName}</p>
+                  )}
                 </div>
               </button>
             ))}

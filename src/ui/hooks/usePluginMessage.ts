@@ -16,22 +16,43 @@ export function usePluginMessages(): void {
         case 'SCAN_PROGRESS':
           setScanProgress(msg.payload)
           break
+
         case 'SCAN_COMPLETE':
           setScanResult(msg.payload)
           navigate('audit')
           break
+
         case 'SCAN_ERROR':
           setScanError(msg.payload.error)
           showToast(msg.payload.error, 'error')
           break
+
         case 'SCAN_CANCELLED':
           useAuditStore.getState().cancelScan()
           break
+
         case 'SELECTION_INFO':
           setSelectionCount(msg.payload.count)
           break
-        case 'NODES_SELECTED':
-          showToast(`${msg.payload.count} layer${msg.payload.count !== 1 ? 's' : ''} selected`, 'success')
+
+        case 'NODES_SELECTED': {
+          const { count, pageChanged, pageName, notFound } = msg.payload
+          const layerWord = count !== 1 ? 'layers' : 'layer'
+
+          let message = `${count} ${layerWord} selected`
+          if (pageChanged) message = `Navigated to “${pageName}” — ${message}`
+          if (notFound > 0) {
+            const missingWord = notFound !== 1 ? 'layers' : 'layer'
+            message += ` (${notFound} ${missingWord} no longer exist)`
+          }
+
+          showToast(message, 'success')
+          break
+        }
+
+        case 'NAVIGATION_ERROR':
+          // Show meaningful error — never show "0 layers found"
+          showToast(msg.payload.error, 'error')
           break
       }
     }
