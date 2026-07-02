@@ -2,12 +2,13 @@ import { registerModule, registerAdapter, getAdapter } from '../engine/registry'
 import { scanEngine } from '../engine/core'
 import { typographyModule } from '../modules/typography/index'
 import { typographyScannerAdapter } from '../modules/typography/adapter'
+import { runAllBenchmarks } from '../benchmarks/runner'
 import type { UIToPluginMessage, PluginToUIMessage } from '../shared/messages'
 import type { AuditResult } from '../shared/types'
 
 // ---------------------------------------------------------------------------
-// Module + Adapter registration
-// Every new module requires two registrations:
+// Registration
+// Every new module requires two lines here:
 //   registerModule()  — metadata + AuditModule interface (UI catalog)
 //   registerAdapter() — ScannerAdapter for the Core Scan Engine
 // ---------------------------------------------------------------------------
@@ -36,10 +37,7 @@ function fmtMs(ms: number): string {
   return `${ms}ms`
 }
 
-interface ProfileStage {
-  name: string
-  ms: number
-}
+interface ProfileStage { name: string; ms: number }
 
 function printScanProfile(stages: ProfileStage[], totalMs: number): void {
   const NAME_COL = 16
@@ -58,9 +56,7 @@ function printScanProfile(stages: ProfileStage[], totalMs: number): void {
 
   console.log('')
   console.log('  ┌─ Refactor Scan Profile ─────────────────────┐')
-  for (const s of stages) {
-    console.log(row(s.name, s.ms))
-  }
+  for (const s of stages) console.log(row(s.name, s.ms))
   console.log(divider)
   console.log(row('Total', totalMs))
   console.log('  └' + '─'.repeat(NAME_COL + VAL_COL + 13) + '┘')
@@ -74,15 +70,21 @@ function printScanProfile(stages: ProfileStage[], totalMs: number): void {
 // ---------------------------------------------------------------------------
 
 figma.ui.onmessage = async (rawMsg: unknown) => {
+  // ── Developer-only: benchmark runner ─────────────────────────────────────
+  // Not part of UIToPluginMessage. Not exposed in any production UI.
+  // Trigger from the Figma developer console:
+  //   figma.ui.postMessage({ type: 'RUN_BENCHMARKS' })
+  if ((rawMsg as { type?: string }).type === 'RUN_BENCHMARKS') {
+    await runAllBenchmarks()
+    return
+  }
+
   const msg = rawMsg as UIToPluginMessage
 
   switch (msg.type) {
     case 'GET_SELECTION_INFO': {
       const count = figma.currentPage.selection.length
-      send({
-        type: 'SELECTION_INFO',
-        payload: { count, hasSelection: count > 0 },
-      })
+      send({ type: 'SELECTION_INFO', payload: { count, hasSelection: count > 0 } })
       break
     }
 
@@ -102,8 +104,6 @@ figma.ui.onmessage = async (rawMsg: unknown) => {
     case 'START_SCAN': {
       const { moduleId, scope } = msg.payload
 
-      // Look up the adapter for this module.
-      // The engine only accepts adapters — never AuditModule directly.
       const adapter = getAdapter(moduleId)
       if (!adapter) {
         send({ type: 'SCAN_ERROR', payload: { error: `No adapter registered for module "${moduleId}".` } })
@@ -116,9 +116,6 @@ figma.ui.onmessage = async (rawMsg: unknown) => {
       send({ type: 'SCAN_STARTED', payload: { moduleId, scope } })
 
       try {
-        // The Core Scan Engine owns traversal, extraction, progress,
-        // cancellation, and grouping. main.ts passes the adapter and
-        // cancellation signal; the engine does the rest.
         const { items, groups } = await scanEngine.run(
           adapter,
           scope,
@@ -135,18 +132,13 @@ figma.ui.onmessage = async (rawMsg: unknown) => {
         }
 
         const scopeLabel =
-          scope === 'selection'
-            ? 'Selection'
-            : scope === 'page'
-              ? figma.currentPage.name
-              : 'Entire File'
+          scope === 'selection' ? 'Selection'
+          : scope === 'page'    ? figma.currentPage.name
+          : 'Entire File'
 
-        // ── Stage: Construction ──────────────────────────────────────────
         const tSerial = Date.now()
         const result: AuditResult = {
-          moduleId,
-          scope,
-          scopeLabel,
+          moduleId, scope, scopeLabel,
           totalItems: items.length,
           groups,
           scannedAt: tTotal,
@@ -154,16 +146,13 @@ figma.ui.onmessage = async (rawMsg: unknown) => {
         }
         const serialMs = Date.now() - tSerial
 
-        // ── Stage: Messaging ──────────────────────────────────────────────
         const tMsg = Date.now()
         send({ type: 'SCAN_COMPLETE', payload: result })
         const msgMs = Date.now() - tMsg
 
         const totalMs = Date.now() - tTotal
-
-        // Read timing data from the engine (traversal + extraction +
-        // grouping + sorting all measured internally by the engine).
         const t = scanEngine.timings
+
         printScanProfile(
           [
             { name: 'Traversal',     ms: t.traversalMs },
