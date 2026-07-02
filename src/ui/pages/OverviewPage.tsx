@@ -1,23 +1,16 @@
 import { useMemo } from 'react'
-import { ArrowRight, Type, FileText } from 'lucide-react'
+import { ArrowRight, Type, FileText, GitBranch } from 'lucide-react'
 import { Button } from '../components/ui/Button'
 import { useUIStore } from '../store/ui'
 import { useAuditStore } from '../store/audit'
+import { useCandidateFamilies } from '../hooks/useCandidateFamilies'
 import type { SourceType } from '../../shared/types'
 
-function StatCard({
-  label, value, sub, dim = false,
-}: { label: string; value: string | number; sub?: string; dim?: boolean }) {
+function StatCard({ label, value, sub, dim = false }: { label: string; value: string | number; sub?: string; dim?: boolean }) {
   return (
-    <div className={`flex-1 bg-surface-1 border border-border rounded px-3 py-2.5 min-w-0 ${
-      dim ? 'opacity-50' : ''
-    }`}>
+    <div className={`flex-1 bg-surface-1 border border-border rounded px-3 py-2.5 min-w-0 ${ dim ? 'opacity-50' : ''}`}>
       <p className="text-2xs text-ink-3 font-medium uppercase tracking-wider mb-1">{label}</p>
-      <p className={`text-xl font-semibold tabular-nums leading-none ${
-        dim ? 'text-ink-3' : 'text-ink'
-      }`}>
-        {value}
-      </p>
+      <p className={`text-xl font-semibold tabular-nums leading-none ${ dim ? 'text-ink-3' : 'text-ink'}`}>{value}</p>
       {sub && <p className="text-xs text-ink-3 mt-1 truncate">{sub}</p>}
     </div>
   )
@@ -38,9 +31,7 @@ interface Observation { level: 'info' | 'warning'; message: string }
 function ObsBadge({ obs }: { obs: Observation }) {
   return (
     <div className={`flex items-start gap-2 px-3 py-2 rounded border text-xs leading-relaxed ${
-      obs.level === 'warning'
-        ? 'bg-warning-subtle border-warning/20 text-warning'
-        : 'bg-surface-0 border-border text-ink-3'
+      obs.level === 'warning' ? 'bg-warning-subtle border-warning/20 text-warning' : 'bg-surface-0 border-border text-ink-3'
     }`}>
       <span className="shrink-0">{obs.level === 'warning' ? '⚠️' : 'ℹ️'}</span>
       <span>{obs.message}</span>
@@ -51,6 +42,7 @@ function ObsBadge({ obs }: { obs: Observation }) {
 export function OverviewPage() {
   const { navigate } = useUIStore()
   const { result } = useAuditStore()
+  const families = useCandidateFamilies()
 
   const { stats, bySource, observations } = useMemo(() => {
     if (!result) return { stats: null, bySource: new Map<SourceType, number>(), observations: [] }
@@ -58,14 +50,21 @@ export function OverviewPage() {
     const uniquePages = new Set<string>()
     result.groups.forEach((g) => g.items.forEach((item) => uniquePages.add(item.pageId)))
 
-    // Source breakdown
     const src = new Map<SourceType, number>()
     for (const g of result.groups) {
-      const s: SourceType = (g.source as SourceType) ?? 'Unknown'
+      const s = (g.source ?? 'Unknown') as SourceType
       src.set(s, (src.get(s) ?? 0) + g.count)
     }
 
-    // Health observations
+    const familyStats = families.length > 0 ? {
+      totalFamilies:           families.length,
+      avgFamilySize:           Math.round((result.groups.length / families.length) * 10) / 10,
+      avgConfidence:           Math.round(families.reduce((s, f) => s + f.confidence, 0) / families.length),
+      totalOutliers:           families.reduce((s, f) => s + f.outlierCount, 0),
+      consolidationOpportunities: families.filter(f => f.signatureCount > 1).length,
+      largestFamily:           families.reduce((m, f) => f.signatureCount > m.signatureCount ? f : m),
+    } : null
+
     const obs: Observation[] = []
     const rawLayers = src.get('Raw Values') ?? 0
     if (rawLayers > result.totalItems * 0.5) {
@@ -81,18 +80,18 @@ export function OverviewPage() {
 
     return {
       stats: {
-        totalLayers: result.totalItems,
-        signatures: result.groups.length,
+        totalLayers: result.totalItems, signatures: result.groups.length,
         pagesScanned: uniquePages.size,
         mostUsed: result.groups[0] ?? null,
         scopeLabel: result.scopeLabel,
         scannedAt: new Date(result.scannedAt).toLocaleTimeString(),
         durationSec: (result.durationMs / 1000).toFixed(1),
+        familyStats,
       },
       bySource: src,
       observations: obs,
     }
-  }, [result])
+  }, [result, families])
 
   if (!stats) {
     return (
@@ -107,9 +106,7 @@ export function OverviewPage() {
               <Type className="w-6 h-6 text-ink-3" strokeWidth={1.5} />
             </div>
             <p className="text-sm font-medium text-ink mb-1">No scan data yet</p>
-            <p className="text-xs text-ink-3 leading-relaxed mb-4">
-              Scan this document to see a summary of typography signatures, sources, and consistency metrics.
-            </p>
+            <p className="text-xs text-ink-3 leading-relaxed mb-4">Scan this document to see a summary of typography signatures, sources, and candidate families.</p>
             <Button variant="primary" size="md" onClick={() => navigate('scan')}>Run Scan</Button>
           </div>
         </div>
@@ -117,32 +114,27 @@ export function OverviewPage() {
     )
   }
 
+  const { familyStats } = stats
+
   return (
     <div className="flex flex-col h-full overflow-y-auto bg-surface-0">
-      {/* Scan meta */}
       <div className="px-5 pt-4 pb-3 border-b border-border-subtle bg-surface-1 shrink-0">
-        <div>
-          <h1 className="text-base font-semibold text-ink">Overview</h1>
-          <p className="text-xs text-ink-3 mt-0.5">
-            Scope: <span className="font-medium text-ink-2">{stats.scopeLabel}</span>
-            <span className="mx-2 text-border-strong">·</span>Scanned at {stats.scannedAt}
-            <span className="mx-2 text-border-strong">·</span>{stats.durationSec}s
-          </p>
-        </div>
+        <h1 className="text-base font-semibold text-ink">Overview</h1>
+        <p className="text-xs text-ink-3 mt-0.5">
+          Scope: <span className="font-medium text-ink-2">{stats.scopeLabel}</span>
+          <span className="mx-2 text-border-strong">·</span>Scanned at {stats.scannedAt}
+          <span className="mx-2 text-border-strong">·</span>{stats.durationSec}s
+        </p>
       </div>
 
       <div className="flex-1 px-5 py-4 space-y-5">
-        {/* Health observations */}
         {observations.length > 0 && (
           <section>
             <p className="text-2xs font-semibold text-ink-disabled uppercase tracking-widest mb-2">Observations</p>
-            <div className="space-y-1.5">
-              {observations.map((obs, i) => <ObsBadge key={i} obs={obs} />)}
-            </div>
+            <div className="space-y-1.5">{observations.map((obs, i) => <ObsBadge key={i} obs={obs} />)}</div>
           </section>
         )}
 
-        {/* Audit results */}
         <section>
           <p className="text-2xs font-semibold text-ink-disabled uppercase tracking-widest mb-2">Audit Results</p>
           <div className="flex gap-2 flex-wrap">
@@ -152,48 +144,50 @@ export function OverviewPage() {
           </div>
         </section>
 
-        {/* Source breakdown — real data from Sprint 2 */}
         {bySource.size > 0 && (
           <section>
             <p className="text-2xs font-semibold text-ink-disabled uppercase tracking-widest mb-2">Source Breakdown</p>
             <div className="flex gap-2 flex-wrap">
-              {bySource.get('Raw Values') !== undefined && (
-                <StatCard label="Raw Values" value={(bySource.get('Raw Values') ?? 0).toLocaleString()} sub="layers" />
-              )}
-              {bySource.get('Local Text Style') !== undefined && (
-                <StatCard label="Local Styles" value={(bySource.get('Local Text Style') ?? 0).toLocaleString()} sub="layers" />
-              )}
-              {bySource.get('Library Text Style') !== undefined && (
-                <StatCard label="Library Styles" value={(bySource.get('Library Text Style') ?? 0).toLocaleString()} sub="layers" />
-              )}
-              {bySource.get('Variable') !== undefined && (
-                <StatCard label="Variables" value={(bySource.get('Variable') ?? 0).toLocaleString()} sub="layers" />
-              )}
+              {bySource.get('Raw Values') !== undefined && <StatCard label="Raw Values" value={(bySource.get('Raw Values') ?? 0).toLocaleString()} sub="layers" />}
+              {bySource.get('Local Text Style') !== undefined && <StatCard label="Local Styles" value={(bySource.get('Local Text Style') ?? 0).toLocaleString()} sub="layers" />}
+              {bySource.get('Library Text Style') !== undefined && <StatCard label="Library Styles" value={(bySource.get('Library Text Style') ?? 0).toLocaleString()} sub="layers" />}
+              {bySource.get('Variable') !== undefined && <StatCard label="Variables" value={(bySource.get('Variable') ?? 0).toLocaleString()} sub="layers" />}
             </div>
           </section>
         )}
 
-        {/* Coming Soon */}
+        {familyStats && (
+          <section>
+            <p className="text-2xs font-semibold text-ink-disabled uppercase tracking-widest mb-2">Candidate Families</p>
+            <div className="flex gap-2 flex-wrap">
+              <StatCard label="Families" value={familyStats.totalFamilies} sub={`avg ${familyStats.avgFamilySize} sigs each`} />
+              <StatCard label="Avg Confidence" value={`${familyStats.avgConfidence}%`} />
+              <StatCard label="Can Consolidate" value={familyStats.consolidationOpportunities} sub="families with 2+ sigs" />
+              {familyStats.totalOutliers > 0 && <StatCard label="Outliers" value={familyStats.totalOutliers} sub="across all families" />}
+            </div>
+          </section>
+        )}
+
         <section>
           <p className="text-2xs font-semibold text-ink-disabled uppercase tracking-widest mb-2">
             Platform Insights <span className="normal-case font-normal">Coming Soon</span>
           </p>
           <div className="flex gap-2 flex-wrap">
-            <ComingSoonCard label="Typography Families" description="Clusters of visually similar signatures" />
             <ComingSoonCard label="Migration Readiness" description="Percentage of layers ready to migrate" />
-          </div>
-          <div className="flex gap-2 flex-wrap mt-2">
             <ComingSoonCard label="Suggested Reduction" description="Estimated signatures after standardisation" />
-            <ComingSoonCard label="AI Readiness" description="Suitability for automated migration" />
           </div>
         </section>
 
-        {/* CTAs */}
-        <div className="flex gap-2 pt-1">
+        <div className="flex gap-2 pt-1 flex-wrap">
           <Button variant="primary" size="sm" onClick={() => navigate('signatures')}>
             View Signatures <ArrowRight className="w-3.5 h-3.5" />
           </Button>
-          <Button variant="secondary" size="sm" onClick={() => navigate('sources')}>
+          {familyStats && (
+            <Button variant="secondary" size="sm" onClick={() => navigate('families')}>
+              <GitBranch className="w-3.5 h-3.5" /> Candidate Families
+            </Button>
+          )}
+          <Button variant="ghost" size="sm" onClick={() => navigate('sources')}>
             <FileText className="w-3.5 h-3.5" /> Sources
           </Button>
         </div>

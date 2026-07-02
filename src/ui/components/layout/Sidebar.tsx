@@ -1,10 +1,5 @@
 import {
-  LayoutDashboard,
-  Type,
-  Layers,
-  GitMerge,
-  Settings,
-  ChevronRight,
+  LayoutDashboard, Type, Layers, GitBranch, GitMerge, Settings,
 } from 'lucide-react'
 import { cn } from '../../lib/cn'
 import { useUIStore, type AppPage } from '../../store/ui'
@@ -15,13 +10,15 @@ interface NavItem {
   label: string
   icon: React.ElementType
   available: boolean
+  requiresScan?: boolean
   comingSoon?: boolean
 }
 
 const WORKSPACE_NAV: NavItem[] = [
-  { id: 'overview',    label: 'Overview',                icon: LayoutDashboard, available: true },
-  { id: 'signatures',  label: 'Typography Signatures',  icon: Type,            available: true },
-  { id: 'sources',     label: 'Sources',                icon: Layers,          available: true },
+  { id: 'overview',   label: 'Overview',                icon: LayoutDashboard, available: true },
+  { id: 'signatures', label: 'Typography Signatures',  icon: Type,            available: true, requiresScan: true },
+  { id: 'sources',    label: 'Sources',                icon: Layers,          available: true, requiresScan: true },
+  { id: 'families',   label: 'Candidate Families',     icon: GitBranch,       available: true, requiresScan: true },
 ]
 
 const COMING_SOON_NAV: NavItem[] = [
@@ -34,9 +31,7 @@ export function Sidebar() {
 
   function handleNav(item: NavItem) {
     if (!item.available) return
-    // Typography Signatures and Sources require a scan to be meaningful.
-    // If no result yet, redirect to Overview.
-    if ((item.id === 'signatures' || item.id === 'sources') && !result) {
+    if (item.requiresScan && !result) {
       navigate('overview')
       return
     }
@@ -45,7 +40,6 @@ export function Sidebar() {
 
   return (
     <aside className="w-[192px] shrink-0 bg-surface-1 border-r border-border flex flex-col h-full">
-      {/* Logo */}
       <div className="h-11 flex items-center px-4 border-b border-border-subtle shrink-0">
         <div className="flex items-center gap-2">
           <div className="w-5 h-5 bg-ink rounded flex items-center justify-center">
@@ -56,12 +50,10 @@ export function Sidebar() {
         <span className="ml-auto text-2xs text-ink-disabled font-medium">v0.1</span>
       </div>
 
-      {/* Workspace nav */}
       <nav className="flex-1 overflow-y-auto py-2 px-2">
         <p className="px-2 py-1.5 text-2xs font-semibold text-ink-disabled uppercase tracking-widest">
           Workspace
         </p>
-
         {WORKSPACE_NAV.map((item) => {
           const Icon = item.icon
           const isActive = currentPage === item.id
@@ -82,28 +74,22 @@ export function Sidebar() {
           )
         })}
 
-        {/* Coming Soon divider */}
         <div className="my-2 mx-2 border-t border-border-subtle" />
         <p className="px-2 py-1 text-2xs font-semibold text-ink-disabled uppercase tracking-widest">
           Coming Soon
         </p>
-
         {COMING_SOON_NAV.map((item) => {
           const Icon = item.icon
           return (
-            <div
-              key={item.id}
-              className="flex items-center gap-2.5 px-2 py-1.5 rounded text-ink-disabled cursor-not-allowed"
-            >
+            <div key={item.id} className="flex items-center gap-2.5 px-2 py-1.5 rounded text-ink-disabled cursor-not-allowed">
               <Icon className="w-3.5 h-3.5 shrink-0" strokeWidth={1.75} />
               <span className="text-sm flex-1 truncate">{item.label}</span>
-              <span className="text-2xs text-ink-disabled shrink-0">Soon</span>
+              <span className="text-2xs shrink-0">Soon</span>
             </div>
           )
         })}
       </nav>
 
-      {/* Settings footer */}
       <div className="shrink-0 border-t border-border-subtle p-2">
         <button
           onClick={() => navigate('settings')}

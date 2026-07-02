@@ -4,6 +4,7 @@ import { OverviewPage } from './pages/OverviewPage'
 import { ScanPage } from './pages/ScanPage'
 import { AuditPage } from './pages/AuditPage'
 import { SourcesPage } from './pages/SourcesPage'
+import { FamiliesPage } from './pages/FamiliesPage'
 import { useUIStore } from './store/ui'
 
 export default function App() {
@@ -12,11 +13,12 @@ export default function App() {
 
   return (
     <AppShell>
-      {currentPage === 'overview'    && <OverviewPage />}
-      {currentPage === 'scan'        && <ScanPage />}
-      {currentPage === 'signatures'  && <AuditPage />}
-      {currentPage === 'sources'     && <SourcesPage />}
-      {currentPage === 'settings'    && (
+      {currentPage === 'overview'   && <OverviewPage />}
+      {currentPage === 'scan'       && <ScanPage />}
+      {currentPage === 'signatures' && <AuditPage />}
+      {currentPage === 'sources'    && <SourcesPage />}
+      {currentPage === 'families'   && <FamiliesPage />}
+      {currentPage === 'settings'   && (
         <div className="flex items-center justify-center h-full">
           <div className="text-center">
             <p className="text-sm font-medium text-ink">Settings</p>
