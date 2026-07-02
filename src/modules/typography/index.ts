@@ -3,6 +3,19 @@ import type { TypographyProperties } from './types'
 import { normalizeTypography } from './normalizer'
 import { scanTypography } from './scanner'
 
+// ---------------------------------------------------------------------------
+// Profiling data — populated during every group() call.
+// Read by src/plugin/main.ts after the call returns to build the report.
+// ---------------------------------------------------------------------------
+export const _groupTimings = {
+  normalizationMs: 0,
+  sortingMs: 0,
+}
+
+// ---------------------------------------------------------------------------
+// Internals
+// ---------------------------------------------------------------------------
+
 function hashKey(key: string): string {
   let hash = 0
   for (let i = 0; i < key.length; i++) {
@@ -12,6 +25,10 @@ function hashKey(key: string): string {
   }
   return `typo_${Math.abs(hash).toString(36)}`
 }
+
+// ---------------------------------------------------------------------------
+// Typography Module — reference AuditModule implementation
+// ---------------------------------------------------------------------------
 
 export const typographyModule: AuditModule<TypographyProperties> = {
   id: 'typography',
@@ -37,6 +54,10 @@ export const typographyModule: AuditModule<TypographyProperties> = {
   group(items: AuditItem<TypographyProperties>[]): AuditGroup<TypographyProperties>[] {
     const buckets = new Map<string, AuditItem<TypographyProperties>[]>()
 
+    // ── Stage: Normalization ───────────────────────────────────────────────
+    // Normalizes each item into a grouping key and distributes into buckets.
+    const tNormStart = Date.now()
+
     for (const item of items) {
       const key = this.normalize(item)
       const bucket = buckets.get(key)
@@ -47,8 +68,10 @@ export const typographyModule: AuditModule<TypographyProperties> = {
       }
     }
 
-    const groups: AuditGroup<TypographyProperties>[] = []
+    _groupTimings.normalizationMs = Date.now() - tNormStart
 
+    // Build group objects from buckets (not timed separately — O(n) trivial)
+    const groups: AuditGroup<TypographyProperties>[] = []
     for (const [key, bucket] of buckets) {
       const descriptor = bucket[0].properties
       groups.push({
@@ -61,7 +84,10 @@ export const typographyModule: AuditModule<TypographyProperties> = {
       })
     }
 
+    // ── Stage: Sorting ─────────────────────────────────────────────────────
+    const tSortStart = Date.now()
     groups.sort((a, b) => b.count - a.count)
+    _groupTimings.sortingMs = Date.now() - tSortStart
 
     return groups
   },

@@ -2,6 +2,20 @@ import type { AuditItem, ScanProgress, ScanScope } from '../../shared/types'
 import type { TypographyProperties, NormalizedLineHeight, NormalizedLetterSpacing } from './types'
 import { styleToWeight } from './normalizer'
 
+// ---------------------------------------------------------------------------
+// Profiling data — populated during every scanTypography() call.
+// Read by src/plugin/main.ts after the call returns to build the report.
+// ---------------------------------------------------------------------------
+export const _scanTimings = {
+  traversalMs: 0,
+  extractionMs: 0,
+  nodeCount: 0,
+}
+
+// ---------------------------------------------------------------------------
+// Internals
+// ---------------------------------------------------------------------------
+
 function findTextNodes(node: BaseNode, results: TextNode[] = []): TextNode[] {
   if (node.type === 'TEXT') {
     results.push(node as TextNode)
@@ -80,17 +94,29 @@ function findPageForNode(nodeId: string): { pageId: string; pageName: string } {
   return { pageId: figma.currentPage.id, pageName: figma.currentPage.name }
 }
 
+// ---------------------------------------------------------------------------
+// Public scanner — unchanged behaviour; timing data written to _scanTimings
+// ---------------------------------------------------------------------------
+
 export async function scanTypography(
   scope: ScanScope,
   onProgress?: (p: ScanProgress) => void
 ): Promise<AuditItem<TypographyProperties>[]> {
   onProgress?.({ current: 0, total: 0, phase: 'collecting', label: 'Collecting text layers…' })
 
+  // ── Stage: Traversal ────────────────────────────────────────────────────
+  const tTraversalStart = Date.now()
+
   const textNodes: TextNode[] = []
 
   if (scope === 'selection') {
     const sel = figma.currentPage.selection
-    if (sel.length === 0) return []
+    if (sel.length === 0) {
+      _scanTimings.traversalMs = Date.now() - tTraversalStart
+      _scanTimings.extractionMs = 0
+      _scanTimings.nodeCount = 0
+      return []
+    }
     for (const node of sel) {
       findTextNodes(node, textNodes)
     }
@@ -108,6 +134,15 @@ export async function scanTypography(
       findTextNodes(page, textNodes)
     }
   }
+
+  _scanTimings.traversalMs = Date.now() - tTraversalStart
+  _scanTimings.nodeCount = textNodes.length
+
+  // ── Stage: Extraction ───────────────────────────────────────────────────
+  // Includes async yields (setTimeout(r, 0)) every 200 nodes to avoid
+  // blocking the plugin thread. Yield time is counted here intentionally
+  // because it is dead time caused by this phase.
+  const tExtractionStart = Date.now()
 
   const total = textNodes.length
   const items: AuditItem<TypographyProperties>[] = []
@@ -142,6 +177,8 @@ export async function scanTypography(
       properties: props,
     })
   }
+
+  _scanTimings.extractionMs = Date.now() - tExtractionStart
 
   onProgress?.({ current: total, total, phase: 'grouping', label: 'Grouping results…' })
 
