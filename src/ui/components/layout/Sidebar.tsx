@@ -1,5 +1,5 @@
 import {
-  LayoutDashboard, Type, Layers, GitBranch, GitMerge, Settings,
+  LayoutDashboard, Type, Layers, GitBranch, GitMerge, Play, Settings,
 } from 'lucide-react'
 import { cn } from '../../lib/cn'
 import { useUIStore, type AppPage } from '../../store/ui'
@@ -11,7 +11,6 @@ interface NavItem {
   icon: React.ElementType
   available: boolean
   requiresScan?: boolean
-  comingSoon?: boolean
 }
 
 const WORKSPACE_NAV: NavItem[] = [
@@ -21,8 +20,12 @@ const WORKSPACE_NAV: NavItem[] = [
   { id: 'planning',   label: 'Design System Planning', icon: GitBranch,       available: true, requiresScan: true },
 ]
 
-const COMING_SOON_NAV: NavItem[] = [
-  { id: 'settings', label: 'Migration', icon: GitMerge, available: false, comingSoon: true },
+const MIGRATION_NAV: NavItem[] = [
+  { id: 'preview',  label: 'Migration Preview',   icon: GitMerge, available: true,  requiresScan: true },
+]
+
+const DISABLED_NAV = [
+  { label: 'Migration Execution', icon: Play },
 ]
 
 export function Sidebar() {
@@ -33,6 +36,20 @@ export function Sidebar() {
     if (!item.available) return
     if (item.requiresScan && !result) { navigate('overview'); return }
     navigate(item.id)
+  }
+
+  function navButton(item: NavItem) {
+    const Icon = item.icon
+    const isActive = currentPage === item.id
+    return (
+      <button key={item.id} onClick={() => handleNav(item)} className={cn(
+        'w-full flex items-center gap-2.5 px-2 py-1.5 rounded text-left transition-colors duration-120',
+        isActive ? 'bg-accent-subtle text-accent' : 'text-ink-2 hover:bg-surface-hover hover:text-ink'
+      )}>
+        <Icon className="w-3.5 h-3.5 shrink-0" strokeWidth={isActive ? 2 : 1.75} />
+        <span className="text-sm flex-1 truncate">{item.label}</span>
+      </button>
+    )
   }
 
   return (
@@ -48,27 +65,20 @@ export function Sidebar() {
       </div>
 
       <nav className="flex-1 overflow-y-auto py-2 px-2">
+        {/* Discovery + Planning */}
         <p className="px-2 py-1.5 text-2xs font-semibold text-ink-disabled uppercase tracking-widest">Workspace</p>
-        {WORKSPACE_NAV.map((item) => {
-          const Icon = item.icon
-          const isActive = currentPage === item.id
-          return (
-            <button key={item.id} onClick={() => handleNav(item)} className={cn(
-              'w-full flex items-center gap-2.5 px-2 py-1.5 rounded text-left transition-colors duration-120',
-              isActive ? 'bg-accent-subtle text-accent' : 'text-ink-2 hover:bg-surface-hover hover:text-ink'
-            )}>
-              <Icon className="w-3.5 h-3.5 shrink-0" strokeWidth={isActive ? 2 : 1.75} />
-              <span className="text-sm flex-1 truncate">{item.label}</span>
-            </button>
-          )
-        })}
+        {WORKSPACE_NAV.map(navButton)}
 
+        {/* Migration */}
         <div className="my-2 mx-2 border-t border-border-subtle" />
-        <p className="px-2 py-1 text-2xs font-semibold text-ink-disabled uppercase tracking-widest">Coming Soon</p>
-        {COMING_SOON_NAV.map((item) => {
+        <p className="px-2 py-1 text-2xs font-semibold text-ink-disabled uppercase tracking-widest">Migration</p>
+        {MIGRATION_NAV.map(navButton)}
+
+        {/* Disabled */}
+        {DISABLED_NAV.map(item => {
           const Icon = item.icon
           return (
-            <div key={item.id} className="flex items-center gap-2.5 px-2 py-1.5 rounded text-ink-disabled cursor-not-allowed">
+            <div key={item.label} className="flex items-center gap-2.5 px-2 py-1.5 rounded text-ink-disabled cursor-not-allowed">
               <Icon className="w-3.5 h-3.5 shrink-0" strokeWidth={1.75} />
               <span className="text-sm flex-1 truncate">{item.label}</span>
               <span className="text-2xs shrink-0">Soon</span>

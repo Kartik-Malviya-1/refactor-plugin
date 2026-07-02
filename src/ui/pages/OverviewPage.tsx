@@ -1,19 +1,20 @@
 import { useMemo } from 'react'
-import { ArrowRight, Type, FileText, GitBranch } from 'lucide-react'
+import { ArrowRight, Type, FileText, GitBranch, GitMerge } from 'lucide-react'
 import { Button } from '../components/ui/Button'
 import { useUIStore } from '../store/ui'
 import { useAuditStore } from '../store/audit'
 import { useCandidateFamilies } from '../hooks/useCandidateFamilies'
 import { useMigrationStore } from '../store/migration'
 import { useSmartSuggestions } from '../hooks/useSmartSuggestions'
+import { usePlanningDataStore } from '../store/planningData'
+import { buildPreviewItems } from '../../preview/analysis'
+import { detectConflicts, runValidation } from '../../preview/conflicts'
+import { generateStatistics } from '../../preview/statistics'
 import type { SourceType } from '../../shared/types'
 
 const STRATEGY_LABEL: Record<string, string> = {
-  'existing-design-system': 'Existing Design System',
-  'existing-variables': 'Existing Variables',
-  'create-new': 'Create New',
-  manual: 'Manual',
-  hybrid: 'Hybrid',
+  'existing-design-system': 'Existing Design System', 'existing-variables': 'Existing Variables',
+  'create-new': 'Create New', manual: 'Manual', hybrid: 'Hybrid',
 }
 
 function StatCard({ label, value, sub, dim = false }: { label: string; value: string|number; sub?: string; dim?: boolean }) {
@@ -25,7 +26,13 @@ function StatCard({ label, value, sub, dim = false }: { label: string; value: st
     </div>
   )
 }
-
+function ObsBadge({ obs }: { obs: { level: 'info'|'warning'; message: string } }) {
+  return (
+    <div className={`flex items-start gap-2 px-3 py-2 rounded border text-xs leading-relaxed ${
+      obs.level === 'warning' ? 'bg-warning-subtle border-warning/20 text-warning' : 'bg-surface-0 border-border text-ink-3'
+    }`}><span className="shrink-0">{obs.level === 'warning' ? '⚠️' : 'ℹ️'}</span><span>{obs.message}</span></div>
+  )
+}
 function ComingSoon({ label, description }: { label: string; description: string }) {
   return (
     <div className="flex-1 bg-surface-0 border border-dashed border-border rounded px-3 py-2.5 min-w-0">
@@ -36,22 +43,13 @@ function ComingSoon({ label, description }: { label: string; description: string
   )
 }
 
-function ObsBadge({ obs }: { obs: { level: 'info'|'warning'; message: string } }) {
-  return (
-    <div className={`flex items-start gap-2 px-3 py-2 rounded border text-xs leading-relaxed ${
-      obs.level === 'warning' ? 'bg-warning-subtle border-warning/20 text-warning' : 'bg-surface-0 border-border text-ink-3'
-    }`}>
-      <span className="shrink-0">{obs.level === 'warning' ? '⚠️' : 'ℹ️'}</span><span>{obs.message}</span>
-    </div>
-  )
-}
-
 export function OverviewPage() {
   const { navigate } = useUIStore()
   const { result } = useAuditStore()
   const families = useCandidateFamilies()
   const { plan } = useMigrationStore()
   const allSuggestions = useSmartSuggestions()
+  const { textStyles, variables } = usePlanningDataStore()
 
   const { stats, bySource, observations } = useMemo(() => {
     if (!result) return { stats: null, bySource: new Map<SourceType, number>(), observations: [] }
@@ -67,40 +65,45 @@ export function OverviewPage() {
 
     const familyStats = families.length > 0 ? {
       total: families.length,
-      avgSize: Math.round((result.groups.length / families.length) * 10) / 10,
       avgConf: Math.round(families.reduce((s, f) => s + f.confidence, 0) / families.length),
-      outliers: families.reduce((s, f) => s + f.outlierCount, 0),
       consolidate: families.filter(f => f.signatureCount > 1).length,
+      outliers: families.reduce((s, f) => s + f.outlierCount, 0),
     } : null
 
     const planEntries = Object.values(plan.entries)
     const planStats = planEntries.length > 0 ? {
-      total:     planEntries.length,
-      planned:   planEntries.filter(e => e.status === 'planned' || e.status === 'modified').length,
-      skipped:   planEntries.filter(e => e.status === 'skipped').length,
-      remaining: planEntries.filter(e => e.status === 'needs-review' || e.status === 'suggestions-available').length,
-      readiness: Math.round((planEntries.filter(e => ['planned','modified','skipped'].includes(e.status)).length / planEntries.length) * 100),
-      strategy:  plan.strategy,
+      total: planEntries.length,
+      planned: planEntries.filter(e => e.status === 'planned' || e.status === 'modified').length,
+      skipped: planEntries.filter(e => e.status === 'skipped').length,
+      remaining: planEntries.filter(e => ['needs-review','suggestions-available'].includes(e.status)).length,
+      readiness: Math.round(planEntries.filter(e => ['planned','modified','skipped'].includes(e.status)).length / planEntries.length * 100),
+      strategy: plan.strategy,
       existingStylesUsed: planEntries.filter(e => e.target?.type === 'existing-style').length,
       variablesUsed:      planEntries.filter(e => e.target?.type === 'existing-variable').length,
       newStylesPlanned:   planEntries.filter(e => e.target?.type === 'new-style').length,
       manualTargets:      planEntries.filter(e => e.target?.type === 'manual-values').length,
     } : null
 
-    // Suggestion analytics
-    let totalSugs = 0, veryHighCount = 0
-    for (const [, sgs] of allSuggestions) {
-      totalSugs += sgs.length
-      veryHighCount += sgs.filter(s => s.confidence >= 90).length
+    // Preview stats (only if planning data is loaded)
+    let previewStats = null
+    if (planEntries.some(e => e.status === 'planned' || e.status === 'modified')) {
+      const conflicts = detectConflicts(families, plan.entries)
+      const items = buildPreviewItems(families, plan.entries, textStyles, variables, conflicts)
+      const validation = runValidation(families, plan.entries, textStyles, variables)
+      const stats = generateStatistics(families, plan.entries, items, conflicts.length, validation.errors.length, validation.warnings.length)
+      previewStats = {
+        layerChanges: stats.estimatedLayerChanges,
+        reduction: stats.estimatedDuplicateReduction,
+        conflictCount: conflicts.length,
+        validationErrors: validation.errors.length,
+        validationWarnings: validation.warnings.length,
+        valid: validation.valid,
+      }
     }
-    const sugStats = allSuggestions.size > 0 ? {
-      generated: totalSugs,
-      veryHighOpportunities: veryHighCount,
-      avgConfidence: families.length > 0 ? Math.round(
-        [...allSuggestions.values()].flat().reduce((s, sg) => s + sg.confidence, 0) /
-        Math.max(1, [...allSuggestions.values()].flat().length)
-      ) : 0,
-    } : null
+
+    let totalSugs = 0, vhCount = 0
+    for (const [, sgs] of allSuggestions) { totalSugs += sgs.length; vhCount += sgs.filter(s => s.confidence >= 90).length }
+    const sugStats = allSuggestions.size > 0 ? { generated: totalSugs, veryHigh: vhCount } : null
 
     const obs: { level: 'info'|'warning'; message: string }[] = []
     const rawLayers = src.get('Raw Values') ?? 0
@@ -109,8 +112,18 @@ export function OverviewPage() {
     if (srcPresent.length > 1) obs.push({ level: 'info', message: `Multiple sources: ${srcPresent.join(', ')}.` })
     if (result.groups.length > 200) obs.push({ level: 'warning', message: `${result.groups.length.toLocaleString()} unique Typography Signatures.` })
 
-    return { stats: { totalLayers: result.totalItems, signatures: result.groups.length, pagesScanned: uniquePages.size, mostUsed: result.groups[0] ?? null, scopeLabel: result.scopeLabel, scannedAt: new Date(result.scannedAt).toLocaleTimeString(), durationSec: (result.durationMs / 1000).toFixed(1), familyStats, planStats, sugStats }, bySource: src, observations: obs }
-  }, [result, families, plan, allSuggestions])
+    return {
+      stats: {
+        totalLayers: result.totalItems, signatures: result.groups.length,
+        pagesScanned: uniquePages.size, mostUsed: result.groups[0] ?? null,
+        scopeLabel: result.scopeLabel,
+        scannedAt: new Date(result.scannedAt).toLocaleTimeString(),
+        durationSec: (result.durationMs / 1000).toFixed(1),
+        familyStats, planStats, sugStats, previewStats,
+      },
+      bySource: src, observations: obs,
+    }
+  }, [result, families, plan, allSuggestions, textStyles, variables])
 
   if (!stats) {
     return (
@@ -121,11 +134,9 @@ export function OverviewPage() {
         </div>
         <div className="flex-1 flex items-center justify-center p-8">
           <div className="text-center max-w-xs">
-            <div className="w-12 h-12 rounded-xl bg-surface-hover flex items-center justify-center mx-auto mb-4">
-              <Type className="w-6 h-6 text-ink-3" strokeWidth={1.5} />
-            </div>
+            <div className="w-12 h-12 rounded-xl bg-surface-hover flex items-center justify-center mx-auto mb-4"><Type className="w-6 h-6 text-ink-3" strokeWidth={1.5} /></div>
             <p className="text-sm font-medium text-ink mb-1">No scan data yet</p>
-            <p className="text-xs text-ink-3 leading-relaxed mb-4">Scan to see typography signatures, sources, families and planning progress.</p>
+            <p className="text-xs text-ink-3 leading-relaxed mb-4">Scan to see typography signatures, families, planning progress and migration preview.</p>
             <Button variant="primary" size="md" onClick={() => navigate('scan')}>Run Scan</Button>
           </div>
         </div>
@@ -133,7 +144,7 @@ export function OverviewPage() {
     )
   }
 
-  const { familyStats, planStats, sugStats } = stats
+  const { familyStats, planStats, sugStats, previewStats } = stats
 
   return (
     <div className="flex flex-col h-full overflow-y-auto bg-surface-0">
@@ -163,10 +174,10 @@ export function OverviewPage() {
           <section>
             <p className="text-2xs font-semibold text-ink-disabled uppercase tracking-widest mb-2">Source Breakdown</p>
             <div className="flex gap-2 flex-wrap">
-              {bySource.get('Raw Values') !== undefined && <StatCard label="Raw Values" value={(bySource.get('Raw Values')??0).toLocaleString()} sub="layers" />}
-              {bySource.get('Local Text Style') !== undefined && <StatCard label="Local Styles" value={(bySource.get('Local Text Style')??0).toLocaleString()} sub="layers" />}
-              {bySource.get('Library Text Style') !== undefined && <StatCard label="Library Styles" value={(bySource.get('Library Text Style')??0).toLocaleString()} sub="layers" />}
-              {bySource.get('Variable') !== undefined && <StatCard label="Variables" value={(bySource.get('Variable')??0).toLocaleString()} sub="layers" />}
+              {bySource.get('Raw Values')          !== undefined && <StatCard label="Raw Values"     value={(bySource.get('Raw Values')??0).toLocaleString()} sub="layers" />}
+              {bySource.get('Local Text Style')     !== undefined && <StatCard label="Local Styles"   value={(bySource.get('Local Text Style')??0).toLocaleString()} sub="layers" />}
+              {bySource.get('Library Text Style')   !== undefined && <StatCard label="Library Styles" value={(bySource.get('Library Text Style')??0).toLocaleString()} sub="layers" />}
+              {bySource.get('Variable')             !== undefined && <StatCard label="Variables"      value={(bySource.get('Variable')??0).toLocaleString()} sub="layers" />}
             </div>
           </section>
         )}
@@ -175,21 +186,10 @@ export function OverviewPage() {
           <section>
             <p className="text-2xs font-semibold text-ink-disabled uppercase tracking-widest mb-2">Typography Families</p>
             <div className="flex gap-2 flex-wrap">
-              <StatCard label="Families" value={familyStats.total} sub={`avg ${familyStats.avgSize} sigs`} />
-              <StatCard label="Avg Confidence" value={`${familyStats.avgConf}%`} />
+              <StatCard label="Families" value={familyStats.total} sub={`avg ${familyStats.avgConf}% confidence`} />
               <StatCard label="Consolidatable" value={familyStats.consolidate} sub="families" />
               {familyStats.outliers > 0 && <StatCard label="Outliers" value={familyStats.outliers} />}
-            </div>
-          </section>
-        )}
-
-        {sugStats && (
-          <section>
-            <p className="text-2xs font-semibold text-ink-disabled uppercase tracking-widest mb-2">Smart Suggestions</p>
-            <div className="flex gap-2 flex-wrap">
-              <StatCard label="Generated" value={sugStats.generated} sub={`for ${allSuggestions.size} families`} />
-              <StatCard label="Very High" value={sugStats.veryHighOpportunities} sub="suggestions ≥90%" />
-              <StatCard label="Avg Confidence" value={`${sugStats.avgConfidence}%`} />
+              {sugStats && <StatCard label="Suggestions" value={sugStats.generated} sub={`${sugStats.veryHigh} very high`} />}
             </div>
           </section>
         )}
@@ -220,6 +220,18 @@ export function OverviewPage() {
           </section>
         )}
 
+        {previewStats && (
+          <section>
+            <p className="text-2xs font-semibold text-ink-disabled uppercase tracking-widest mb-2">Migration Preview</p>
+            <div className="flex gap-2 flex-wrap">
+              <StatCard label="Layer Changes" value={previewStats.layerChanges.toLocaleString()} />
+              <StatCard label="Duplicate Reduction" value={previewStats.reduction.toLocaleString()} sub="signatures" />
+              <StatCard label="Validation" value={previewStats.valid ? '✓ Passed' : `${previewStats.validationErrors} error(s)`} />
+              {previewStats.conflictCount > 0 && <StatCard label="Conflicts" value={previewStats.conflictCount} />}
+            </div>
+          </section>
+        )}
+
         <section>
           <p className="text-2xs font-semibold text-ink-disabled uppercase tracking-widest mb-2">Platform Insights <span className="normal-case font-normal">Coming Soon</span></p>
           <div className="flex gap-2 flex-wrap">
@@ -234,7 +246,12 @@ export function OverviewPage() {
           </Button>
           {familyStats && (
             <Button variant="secondary" size="sm" onClick={() => navigate('planning')}>
-              <GitBranch className="w-3.5 h-3.5" /> Design System Planning
+              <GitBranch className="w-3.5 h-3.5" /> Planning
+            </Button>
+          )}
+          {previewStats && (
+            <Button variant="secondary" size="sm" onClick={() => navigate('preview')}>
+              <GitMerge className="w-3.5 h-3.5" /> Preview
             </Button>
           )}
           <Button variant="ghost" size="sm" onClick={() => navigate('sources')}>

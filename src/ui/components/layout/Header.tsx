@@ -8,7 +8,7 @@ export function Header() {
   const { result, isScanning, cancelScan } = useAuditStore()
 
   const showRescan =
-    (['signatures', 'sources', 'planning', 'overview'] as typeof currentPage[]).includes(currentPage) &&
+    (['signatures', 'sources', 'planning', 'preview', 'overview'] as typeof currentPage[]).includes(currentPage) &&
     result && !isScanning
 
   return (
@@ -19,6 +19,7 @@ export function Header() {
         {currentPage === 'signatures' && (<><button onClick={() => navigate('overview')} className="hover:text-ink transition-colors">Overview</button><ChevronRight className="w-3.5 h-3.5 shrink-0" /><span className="font-medium text-ink">Typography Signatures</span>{result && (<><ChevronRight className="w-3.5 h-3.5 shrink-0" /><span className="text-ink-3 truncate max-w-[120px]">{result.scopeLabel}</span></>)}</>)}
         {currentPage === 'sources'    && (<><button onClick={() => navigate('overview')} className="hover:text-ink transition-colors">Overview</button><ChevronRight className="w-3.5 h-3.5 shrink-0" /><span className="font-medium text-ink">Sources</span></>)}
         {currentPage === 'planning'   && (<><button onClick={() => navigate('overview')} className="hover:text-ink transition-colors">Overview</button><ChevronRight className="w-3.5 h-3.5 shrink-0" /><span className="font-medium text-ink">Design System Planning</span></>)}
+        {currentPage === 'preview'    && (<><button onClick={() => navigate('overview')} className="hover:text-ink transition-colors">Overview</button><ChevronRight className="w-3.5 h-3.5 shrink-0" /><span className="font-medium text-ink">Migration Preview</span></>)}
         {currentPage === 'settings'   && <span className="font-medium text-ink">Settings</span>}
       </div>
       <div className="flex-1" />

@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 
-export type AppPage = 'overview' | 'scan' | 'signatures' | 'sources' | 'planning' | 'settings'
+export type AppPage = 'overview' | 'scan' | 'signatures' | 'sources' | 'planning' | 'preview' | 'settings'
 
 interface UIState {
   currentPage: AppPage
