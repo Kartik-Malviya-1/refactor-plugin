@@ -6,6 +6,40 @@ import type { PropertyWeights } from '../similarity/scorer'
 export type { PropertyWeights }
 
 // ---------------------------------------------------------------------------
+// Typography Signature Identity Model
+//
+// Each AuditGroup carries two string identifiers. Only one is canonical.
+//
+//   AuditGroup.key  — CANONICAL identifier.
+//     Derived deterministically by normalizeTypographyProps() in normalizer.ts.
+//     Encodes all discriminating properties as a pipe-separated string:
+//       fontFamily|fontStyle|fontSize|lineHeight|letterSpacing|
+//       textCase|textDecoration|sourceType:styleId
+//     Example:
+//       "Inter|Regular|16|auto|PIXELS:0|ORIGINAL|NONE|LibraryStyle:S:abc"
+//     Properties:
+//       ✓ Stable across repeated scans of the same document
+//       ✓ Stable across application restarts
+//       ✓ Independent of sort order, search, filter, and pagination
+//       ✓ Collision-free (it IS the full canonical string)
+//       ✓ Module-independent (no moduleId embedded)
+//     Use for: assignments, mappings, migration plan, preview, apply,
+//              reports, navigation, orphan pruning, persistent storage.
+//
+//   AuditGroup.id  — DERIVED convenience handle.
+//     Format: "${moduleId}_${hash32(key)}" (e.g. "typography_2a3f4b").
+//     Also deterministic within a session, but:
+//       ✗ Hash collisions possible (~1-in-4B per pair with 32-bit djb2)
+//       ✗ Module-coupled: changes if moduleId is ever renamed
+//     Use for: React rendering keys (.map(g => <Row key={g.id} />)) only.
+//
+//   NodeLocation.id  — specific Figma node. Never reused. Not a signature ID.
+//
+// Rule: use AuditGroup.key everywhere identity is required.
+//       Never mix id and key for the same concern.
+// ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
 // Clustering strategy
 // ---------------------------------------------------------------------------
 
@@ -22,7 +56,7 @@ export interface ClusteringConfig {
 }
 
 // ---------------------------------------------------------------------------
-// Cluster reason (why this cluster exists)
+// Cluster reason
 // ---------------------------------------------------------------------------
 
 export type ClusterReasonType = 'match' | 'similar' | 'different'
@@ -34,7 +68,7 @@ export interface ClusterReason {
 }
 
 // ---------------------------------------------------------------------------
-// Typography Cluster (replaces CandidateFamily in the UI)
+// Typography Cluster
 // ---------------------------------------------------------------------------
 
 export type ConfidenceLabel = 'Very Strong' | 'Strong' | 'Review Recommended' | 'Weak'
@@ -47,14 +81,12 @@ export interface TypographyCluster {
   dominant: TypographyProperties
   confidence: number
   confidenceLabel: ConfidenceLabel
-  /** Deterministic explanation of why this cluster exists. */
   clusterReasons: ClusterReason[]
   sourceBreakdown: Partial<Record<SourceType, number>>
   usageBreakdown: Record<string, number>
   outlierIds: Set<string>
   outlierCount: number
   pageIds: Set<string>
-  /** memberSimilarities[groupId] = similarity to dominant (0-100). */
   memberSimilarities: Map<string, number>
 }
 
@@ -64,8 +96,8 @@ export interface TypographyCluster {
 
 /**
  * An assignment target for one or more Typography Signatures.
- * Stored per-signature in the assignment store.
- * Never exposed to the user as a "mapping" object.
+ * Stored per signature in useAssignmentStore, keyed by AuditGroup.key.
+ * One signature → one AssignedTarget at most.
  */
 export interface AssignedTarget {
   /** Human-readable label for display. */
@@ -75,10 +107,10 @@ export interface AssignedTarget {
 
 /**
  * Internal mapping generated from user assignments.
- * Implementation detail — never shown to users.
+ * References AuditGroup.key (canonical), never AuditGroup.id.
  */
 export interface InternalMapping {
-  signatureId: string       // AuditGroup.id
+  signatureKey: string      // AuditGroup.key — canonical signature identity
   clusterId: string
   targetType: ConsolidationTarget['type']
   target: ConsolidationTarget

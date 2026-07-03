@@ -79,7 +79,7 @@ function SignatureRow({
       </div>
       <div className="text-right">
         {assignment
-          ? <span className="text-2xs text-accent font-medium truncate max-w-[76px] inline-block">✓ {assignment.label}</span>
+          ? <span className="text-2xs text-accent font-medium truncate max-w-[76px] inline-block">✓ {assignment.label}</span>
           : <span className="text-2xs text-ink-disabled">—</span>
         }
       </div>
@@ -99,14 +99,13 @@ export function RawValuesPage() {
   const { expression, addCondition, removeCondition, updateCondition, toggleCondition, clearAll } = useQueryStore()
   const { loaded: planningLoaded, loading: planningLoading } = usePlanningDataStore()
 
-  const [search, setSearch]     = useState('')
+  // Selection is keyed by AuditGroup.key — the canonical Typography Signature
+  // identifier. Stable across repeated scans of the same document.
+  // Never use group.id here (it is a derived shorthand, not the identity).
   const [selected, setSelected] = useState<Set<string>>(new Set())
 
-  // Request planning data on mount so the assignment panel has styles/variables
-  // available when the user makes a selection — even if they didn't visit Overview first.
   useEffect(() => {
     if (!planningLoaded && !planningLoading) {
-      console.log('[Refactor] RawValuesPage: requesting planning data')
       sendToPlugin({ type: 'GET_PLANNING_DATA' })
     }
   }, [planningLoaded, planningLoading])
@@ -139,41 +138,38 @@ export function RawValuesPage() {
       g.descriptor.fontStyle.toLowerCase().includes(q) ||
       String(g.descriptor.fontSize).includes(q)
     )
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [workingSetGroups, search])
 
+  // selectedGroups derived from key-based selection, not id
   const selectedGroups = useMemo(() =>
-    workingSetGroups.filter(g => selected.has(g.id)),
+    workingSetGroups.filter(g => selected.has(g.key)),
     [workingSetGroups, selected]
   )
 
-  function toggleRow(id: string) {
+  const [search, setSearch] = useState('')
+
+  function toggleRow(sigKey: string) {
     const next = new Set(selected)
-    if (next.has(id)) next.delete(id); else next.add(id)
+    if (next.has(sigKey)) next.delete(sigKey); else next.add(sigKey)
     setSelected(next)
-    console.log('[Refactor] Selection updated:', { id, nowSelected: next.has(id), totalSelected: next.size })
   }
   function selectAll() {
-    const ids = new Set(workingSetGroups.map(g => g.id))
-    setSelected(ids)
-    console.log('[Refactor] Selection created: all', ids.size, 'signatures')
+    setSelected(new Set(workingSetGroups.map(g => g.key)))
   }
-  function clearSel() {
-    setSelected(new Set())
-    console.log('[Refactor] Selection cleared')
-  }
+  function clearSel() { setSelected(new Set()) }
   function invertSel() {
     const next = new Set<string>()
-    for (const g of workingSetGroups) { if (!selected.has(g.id)) next.add(g.id) }
+    for (const g of workingSetGroups) { if (!selected.has(g.key)) next.add(g.key) }
     setSelected(next)
-    console.log('[Refactor] Selection inverted:', next.size, 'signatures')
   }
-  function inspectGroup(groupId: string) {
+  function inspectGroup(sigKey: string) {
     setSearchQuery('')
-    selectGroup(groupId)
+    selectGroup(sigKey)
     navigate('typography/signatures')
   }
 
-  const allSelected  = workingSetGroups.length > 0 && workingSetGroups.every(g => selected.has(g.id))
+  const allSelected  = workingSetGroups.length > 0 && workingSetGroups.every(g => selected.has(g.key))
   const someSelected = selected.size > 0 && !allSelected
   const dominant     = selectedGroups[0]?.descriptor ?? workingSetGroups[0]?.descriptor
 
@@ -252,7 +248,7 @@ export function RawValuesPage() {
               </>
             ) : (
               <>
-                <p className="text-sm font-medium text-ink">No signatures match “{search}”</p>
+                <p className="text-sm font-medium text-ink">No signatures match "{search}"</p>
                 <p className="text-xs text-ink-3">Try a different search term.</p>
               </>
             )}
@@ -260,12 +256,12 @@ export function RawValuesPage() {
         ) : (
           displayGroups.map(group => (
             <SignatureRow
-              key={group.id}
+              key={group.key}                        // React render key
               group={group}
-              isSelected={selected.has(group.id)}
-              assignment={assignments[group.id]}
-              onToggle={() => toggleRow(group.id)}
-              onInspect={() => inspectGroup(group.id)}
+              isSelected={selected.has(group.key)}   // canonical identity
+              assignment={assignments[group.key]}     // canonical identity
+              onToggle={() => toggleRow(group.key)}   // canonical identity
+              onInspect={() => inspectGroup(group.key)} // canonical identity
             />
           ))
         )}
@@ -274,7 +270,7 @@ export function RawValuesPage() {
       {/* Assignment Drawer — only appears when signatures are selected */}
       {selected.size > 0 && (
         <AssignmentDrawer
-          selectedIds={[...selected]}
+          selectedIds={[...selected]}   // key values, not id values
           selectedGroups={selectedGroups}
           dominant={dominant}
           onDeselect={clearSel}

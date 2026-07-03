@@ -27,21 +27,17 @@ export function usePluginMessages(): void {
           setScanResult(msg.payload)
           navigate('typography/overview')
 
-          // Invalidate planning data — _styleCache is now warm with fresh data.
-          // The style picker will re-fetch when next opened.
+          // Invalidate planning data so the style picker re-fetches after scan.
           usePlanningDataStore.getState().clear()
 
-          // Prune assignments for signatures that no longer exist after the scan.
-          // This keeps the assignment store consistent with the new scan result.
-          // Note: correctness depends on group IDs being stable across scans of
-          // the same document (deterministic from normalization key + source).
-          const validIds = new Set<string>(msg.payload.groups.map((g: { id: string }) => g.id))
-          const pruned = useAssignmentStore.getState().pruneOrphans(validIds)
+          // Prune orphan assignments using AuditGroup.key — the canonical
+          // Typography Signature identifier. key is stable across scans of
+          // the same document; id is a derived hash and must NOT be used here.
+          const validKeys = new Set<string>(msg.payload.groups.map((g: { key: string }) => g.key))
+          const pruned = useAssignmentStore.getState().pruneOrphans(validKeys)
           if (pruned > 0) console.log(`[Refactor] Pruned ${pruned} orphan assignment(s) after scan`)
 
-          // Performance: pre-fetch planning data immediately while cache is warm.
-          // This pre-warms the style picker so AssignmentPanel opens instantly
-          // instead of showing a loading spinner for the common post-scan path.
+          // Pre-fetch planning data immediately while _styleCache is warm.
           setPlanningLoading(true)
           sendToPlugin({ type: 'GET_PLANNING_DATA' })
           break
