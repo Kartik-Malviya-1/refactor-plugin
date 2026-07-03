@@ -37,7 +37,7 @@ function classifyGroupSources(groups: AuditResult['groups']): void {
 }
 
 // ---------------------------------------------------------------------------
-// Profiler (abbreviated)
+// Profiler helpers
 // ---------------------------------------------------------------------------
 
 function fmtMs(ms: number): string {
@@ -67,6 +67,7 @@ function printDetailedReport(totalMs: number, serialMs: number, msgMs: number, s
   function row(num: string, label: string, ms: number, items: number, il = ''): void {
     console.log(`  ${(num+'  '+label).padEnd(28)}${fmtMs(ms).padStart(9)}   ${pct(ms,totalMs)}  ${items>0?fmtN(items).padStart(9):'        —'}  ${items>0?fmtRate(items,ms).padStart(12):'           —'}  ${il}`)
   }
+  void gi
   console.log('')
   console.log(`  ╔${line}╗`)
   console.log(`  ║  Scan Profile (${scope})${' '.repeat(Math.max(0,W-14-scope.length))}║`)
@@ -118,52 +119,61 @@ figma.ui.onmessage = async (rawMsg: unknown) => {
     }
 
     case 'GET_PLANNING_DATA': {
-      // ── Stage 1: Local styles ─────────────────────────────────────────
-      const localStylesList = figma.getLocalTextStyles()
-      const localStyleIds   = new Set(localStylesList.map(s => s.id))
+      // Declare accumulators outside try so send() can always reference them.
+      // Each stage has its own inner try-catch so a failure in one does not
+      // prevent the others from running.
       const textStyles: AvailableTextStyle[] = []
-
-      for (const s of localStylesList) {
-        const fn = s.fontName as FontName
-        textStyles.push({
-          id: s.id, name: s.name,
-          fontFamily: fn.family, fontStyle: fn.style,
-          fontSize: s.fontSize as number,
-          isLocal: true,
-        })
-      }
-      console.log(`[Refactor] GET_PLANNING_DATA stage 1 — local styles: ${localStylesList.length}`)
-
-      // ── Stage 2: Library styles from scan cache ───────────────────────
-      // figma.getLocalTextStyles() does NOT return library (remote) styles.
-      // The scanner caches every style it encounters via figma.getStyleById().
-      // We read that cache here to include library styles in the picker.
-      const discoveredStyles = getDiscoveredStyles()
-      let libraryStyleCount = 0
-
-      for (const [styleId, cached] of discoveredStyles) {
-        if (!cached)               continue  // style resolution failed during scan
-        if (!cached.remote)        continue  // local — already added above
-        if (localStyleIds.has(styleId)) continue  // safety: skip if somehow in local list
-        if (!cached.fontFamily || !cached.fontStyle || cached.fontSize == null) continue  // incomplete
-
-        const segments = cached.name.split('/')
-        textStyles.push({
-          id:          styleId,
-          name:        cached.name,
-          fontFamily:  cached.fontFamily,
-          fontStyle:   cached.fontStyle,
-          fontSize:    cached.fontSize,
-          isLocal:     false,
-          libraryName: segments.length > 1 ? segments[0].trim() : undefined,
-        })
-        libraryStyleCount++
-      }
-      console.log(`[Refactor] GET_PLANNING_DATA stage 2 — library styles from cache: ${libraryStyleCount}`)
-      console.log(`[Refactor] GET_PLANNING_DATA stage 3 — total styles: ${textStyles.length}`)
-
-      // ── Stage 3: Variables ────────────────────────────────────────────
       const variables: AvailableTypographyVariable[] = []
+
+      // ── Stage 1: local text styles ────────────────────────────────────────
+      let localStyleIds = new Set<string>()
+      try {
+        const localStylesList = figma.getLocalTextStyles()
+        localStyleIds = new Set(localStylesList.map(s => s.id))
+        for (const s of localStylesList) {
+          const fn = s.fontName as FontName
+          textStyles.push({
+            id: s.id, name: s.name,
+            fontFamily: fn.family, fontStyle: fn.style,
+            fontSize: s.fontSize as number,
+            isLocal: true,
+          })
+        }
+        console.log(`[Refactor] GET_PLANNING_DATA: ${localStylesList.length} local styles`)
+      } catch (err) {
+        console.error('[Refactor] GET_PLANNING_DATA stage 1 (local styles) failed:', err)
+      }
+
+      // ── Stage 2: library styles from scan cache ──────────────────────────
+      // figma.getLocalTextStyles() only returns styles defined in this file.
+      // Library (remote) styles used by text nodes are discovered during scan
+      // via figma.getStyleById() and cached in _styleCache in scanner.ts.
+      try {
+        const discoveredStyles = getDiscoveredStyles()
+        let libraryCount = 0
+        for (const [styleId, cached] of discoveredStyles) {
+          if (!cached)                 continue  // unresolved during scan
+          if (!cached.remote)          continue  // local — already in stage 1
+          if (localStyleIds.has(styleId)) continue  // safety dedupe
+          if (!cached.fontFamily || !cached.fontStyle || cached.fontSize == null) continue
+          const segments = cached.name.split('/')
+          textStyles.push({
+            id:          styleId,
+            name:        cached.name,
+            fontFamily:  cached.fontFamily,
+            fontStyle:   cached.fontStyle,
+            fontSize:    cached.fontSize,
+            isLocal:     false,
+            libraryName: segments.length > 1 ? segments[0].trim() : undefined,
+          })
+          libraryCount++
+        }
+        console.log(`[Refactor] GET_PLANNING_DATA: ${libraryCount} library styles from cache, ${textStyles.length} total`)
+      } catch (err) {
+        console.error('[Refactor] GET_PLANNING_DATA stage 2 (library styles) failed:', err)
+      }
+
+      // ── Stage 3: variables ─────────────────────────────────────────────────
       try {
         const collections = figma.variables.getLocalVariableCollections()
         for (const collection of collections) {
@@ -174,9 +184,11 @@ figma.ui.onmessage = async (rawMsg: unknown) => {
             }
           }
         }
-      } catch { /* variables API not available */ }
-      console.log(`[Refactor] GET_PLANNING_DATA stage 4 — variables: ${variables.length}`)
+        console.log(`[Refactor] GET_PLANNING_DATA: ${variables.length} variables`)
+      } catch { /* variables API not available in this context */ }
 
+      // Always send — even if every stage above failed, the UI gets an empty
+      // payload and clears the loading spinner instead of hanging forever.
       send({ type: 'PLANNING_DATA', payload: { textStyles, variables } })
       break
     }
@@ -189,7 +201,7 @@ figma.ui.onmessage = async (rawMsg: unknown) => {
       scanCancelled = false
       const tTotal = Date.now()
 
-      clearStyleCache()          // clear cache so this scan is fresh
+      clearStyleCache()
       resetExtractionInstrument()
       send({ type: 'SCAN_STARTED', payload: { moduleId, scope } })
 
@@ -202,11 +214,10 @@ figma.ui.onmessage = async (rawMsg: unknown) => {
 
         classifyGroupSources(groups)
 
-        // Log style cache stats after scan for debugging
-        const cacheEntries     = [...getDiscoveredStyles().entries()]
-        const localInCache     = cacheEntries.filter(([, c]) => c && !c.remote).length
-        const libraryInCache   = cacheEntries.filter(([, c]) => c && c.remote).length
-        const unresolved       = cacheEntries.filter(([, c]) => c === null).length
+        const cacheEntries   = [...getDiscoveredStyles().entries()]
+        const localInCache   = cacheEntries.filter(([, c]) => c && !c.remote).length
+        const libraryInCache = cacheEntries.filter(([, c]) => c &&  c.remote).length
+        const unresolved     = cacheEntries.filter(([, c]) => c === null).length
         console.log(`[Refactor] Scan complete — style cache: ${localInCache} local, ${libraryInCache} library, ${unresolved} unresolved`)
 
         const scopeLabel = scope === 'selection' ? 'Selection' : scope === 'page' ? figma.currentPage.name : 'Entire File'
