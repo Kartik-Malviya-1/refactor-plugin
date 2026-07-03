@@ -1,9 +1,5 @@
 // ---------------------------------------------------------------------------
-// Migration Domain Model — Sprint 5 update
-//
-// PlanningStatus renamed to reflect user-facing terminology.
-// SmartSuggestion-related types live in src/suggestions/types.ts.
-// Nothing in this module modifies the Figma document.
+// Migration Domain Model
 // ---------------------------------------------------------------------------
 
 export type MigrationStrategy =
@@ -17,18 +13,10 @@ export type ConsolidationTargetType =
   | 'existing-style'
   | 'existing-variable'
   | 'new-style'
+  | 'new-variable'
   | 'manual-values'
   | 'skip'
 
-/**
- * Planning lifecycle for each Typography Family.
- *
- * needs-review        — no action taken yet, no suggestions shown
- * suggestions-available — one or more suggestions computed, awaiting decision
- * planned             — target confirmed (manually or via suggestion)
- * modified            — was accepted via suggestion, then user edited the target
- * skipped             — intentionally excluded from migration
- */
 export type PlanningStatus =
   | 'needs-review'
   | 'suggestions-available'
@@ -69,6 +57,23 @@ export interface NewStyleTarget {
   textDecoration: string
 }
 
+/** Sprint 7: Create a planned typography variable (not created in Figma yet). */
+export interface NewVariableTarget {
+  type: 'new-variable'
+  variableName: string
+  collectionName: string
+  fontFamily: string
+  fontStyle: string
+  fontWeight: number
+  fontSize: number
+  lineHeightUnit: 'AUTO' | 'PIXELS' | 'PERCENT'
+  lineHeightValue: number
+  letterSpacingUnit: 'PIXELS' | 'PERCENT'
+  letterSpacingValue: number
+  textCase: string
+  textDecoration: string
+}
+
 export interface ManualValuesTarget {
   type: 'manual-values'
   fontFamily: string
@@ -92,6 +97,7 @@ export type ConsolidationTarget =
   | ExistingStyleTarget
   | ExistingVariableTarget
   | NewStyleTarget
+  | NewVariableTarget
   | ManualValuesTarget
   | SkipTarget
 
@@ -99,7 +105,6 @@ export interface MigrationEntry {
   familyId: string
   status: PlanningStatus
   target: ConsolidationTarget | null
-  /** True if target was set via a suggestion (not manually). */
   acceptedViaSuggestion: boolean
   userApproved: boolean
   affectedSignatures: number
