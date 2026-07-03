@@ -1,18 +1,13 @@
 import { create } from 'zustand'
 
-/**
- * App pages after v0.2 information architecture redesign.
- * Top-level concepts (Sources, Preview, Simulation) are removed from nav.
- * Typography module has its own sub-pages.
- */
 export type AppPage =
   | 'scan'
-  | 'typography/overview'    // Typography module home — clickable summary cards
-  | 'typography/raw'         // Raw Values detail (All + Clusters tabs)
-  | 'typography/library'     // Library Styles detail
-  | 'typography/local'       // Local Styles detail
-  | 'typography/variables'   // Typography Variables detail
-  | 'typography/signatures'  // Typography Signatures inspector (preserved)
+  | 'typography/overview'
+  | 'typography/raw'
+  | 'typography/library'
+  | 'typography/local'
+  | 'typography/variables'
+  | 'typography/signatures'
   | 'settings'
 
 export type ActiveModule = 'typography' | 'colors' | 'spacing' | 'radius' | 'effects' | 'variables-module'
@@ -20,8 +15,6 @@ export type ActiveModule = 'typography' | 'colors' | 'spacing' | 'radius' | 'eff
 interface UIState {
   currentPage: AppPage
   activeModule: ActiveModule
-
-  // Typography Signatures inspector state (preserved from previous sprints)
   selectedGroupId: string | null
   inspectorOpen: boolean
   expandedGroupIds: Set<string>
@@ -29,12 +22,14 @@ interface UIState {
   sortField: 'count' | 'family' | 'size'
   sortDirection: 'asc' | 'desc'
   selectionCount: number
-
+  /** Current Figma page ID — used to detect cross-page selection. */
+  currentPageId: string
   toast: { message: string; type: 'success' | 'info' | 'error' } | null
 
   navigate: (page: AppPage) => void
   setModule: (m: ActiveModule) => void
   setSelectionCount: (n: number) => void
+  setCurrentPageId: (id: string) => void
   selectGroup: (id: string | null) => void
   toggleGroupExpand: (id: string) => void
   setSearchQuery: (q: string) => void
@@ -53,17 +48,13 @@ export const useUIStore = create<UIState>((set, get) => ({
   sortField: 'count',
   sortDirection: 'desc',
   selectionCount: 0,
+  currentPageId: '',
   toast: null,
 
   navigate: (page) => set({ currentPage: page }),
-
-  setModule: (m) => {
-    // Navigating to a module sets the relevant landing page
-    if (m === 'typography') set({ activeModule: m, currentPage: 'typography/overview' })
-    else set({ activeModule: m })  // coming soon modules don’t change page
-  },
-
+  setModule: (m) => { if (m === 'typography') set({ activeModule: m, currentPage: 'typography/overview' }); else set({ activeModule: m }) },
   setSelectionCount: (n) => set({ selectionCount: n }),
+  setCurrentPageId: (id) => set({ currentPageId: id }),
   selectGroup: (id) => set({ selectedGroupId: id, inspectorOpen: id !== null }),
 
   toggleGroupExpand: (id) => {

@@ -4,9 +4,13 @@ import { useAuditStore } from '../store/audit'
 import { useUIStore } from '../store/ui'
 import { usePlanningDataStore } from '../store/planningData'
 
+// Global flag — TypographyInspector subscribes to this to open Usage Explorer
+export let _showUsageExplorerFlag = false
+export const _usageExplorerListeners: Array<() => void> = []
+
 export function usePluginMessages(): void {
   const { setScanProgress, setScanResult, setScanError } = useAuditStore()
-  const { setSelectionCount, showToast, navigate } = useUIStore()
+  const { setSelectionCount, setCurrentPageId, showToast, navigate } = useUIStore()
   const { setData: setPlanningData } = usePlanningDataStore()
 
   useEffect(() => {
@@ -19,7 +23,7 @@ export function usePluginMessages(): void {
 
         case 'SCAN_COMPLETE':
           setScanResult(msg.payload)
-          navigate('typography/overview')  // v0.2: land on typography overview
+          navigate('typography/overview')
           break
 
         case 'SCAN_ERROR':
@@ -27,12 +31,11 @@ export function usePluginMessages(): void {
           showToast(msg.payload.error, 'error')
           break
 
-        case 'SCAN_CANCELLED':
-          useAuditStore.getState().cancelScan()
-          break
+        case 'SCAN_CANCELLED': useAuditStore.getState().cancelScan(); break
 
         case 'SELECTION_INFO':
           setSelectionCount(msg.payload.count)
+          if (msg.payload.currentPageId) setCurrentPageId(msg.payload.currentPageId)
           break
 
         case 'NODES_SELECTED': {
@@ -45,17 +48,23 @@ export function usePluginMessages(): void {
           break
         }
 
-        case 'NAVIGATION_ERROR':
-          showToast(msg.payload.error, 'error')
-          break
+        case 'NAVIGATION_ERROR': showToast(msg.payload.error, 'error'); break
 
         case 'PLANNING_DATA':
           setPlanningData(msg.payload.textStyles, msg.payload.variables)
+          break
+
+        // v0.2.1: plugin signals that selections span multiple pages.
+        // Notify any mounted TypographyInspector to open the Usage Explorer.
+        case 'SHOW_USAGE_EXPLORER':
+          _showUsageExplorerFlag = true
+          for (const cb of _usageExplorerListeners) cb()
+          _showUsageExplorerFlag = false
           break
       }
     }
 
     window.addEventListener('message', handleMessage)
     return () => window.removeEventListener('message', handleMessage)
-  }, [setScanProgress, setScanResult, setScanError, setSelectionCount, showToast, navigate, setPlanningData])
+  }, [setScanProgress, setScanResult, setScanError, setSelectionCount, setCurrentPageId, showToast, navigate, setPlanningData])
 }
