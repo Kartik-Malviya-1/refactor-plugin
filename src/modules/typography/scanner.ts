@@ -3,13 +3,16 @@ import type { TypographySource } from '../../shared/typography-source'
 import { styleToWeight } from './normalizer'
 import { intern } from '../../engine/traversal'
 
+// Set true to print per-entry style resolution detail during preload.
+const DEBUG = false
+
 // ---------------------------------------------------------------------------
 // Style cache
 //
 // Populated by preloadStyleCacheAsync() BEFORE scanning starts.
 // figma.getStyleByIdAsync() is the only available style resolution API in
-// plugins with documentAccess: "dynamic-page". The synchronous
-// figma.getStyleById() does not exist in this API version.
+// plugins with documentAccess: "dynamic-page".
+// resolveStyle() is cache-only — no Figma API calls during extraction.
 // ---------------------------------------------------------------------------
 interface CachedStyle {
   name:    string
@@ -23,10 +26,11 @@ interface CachedStyle {
 
 const _styleCache = new Map<string, CachedStyle | null>()
 
-// Cache-only lookup — guaranteed to be pre-populated by preloadStyleCacheAsync()
+// Cache-only lookup — pre-populated by preloadStyleCacheAsync().
+// Any styleId not in the cache was not linked to a text node in the
+// scanned scope, or was unresolvable (deleted/missing style).
 function resolveStyle(styleId: string): CachedStyle | null {
   if (_styleCache.has(styleId)) return _styleCache.get(styleId)!
-  // Style was not in scope or wasn't linked to any text node
   _styleCache.set(styleId, null)
   return null
 }
@@ -40,12 +44,14 @@ export function getDiscoveredStyles(): ReadonlyMap<string, CachedStyle | null> {
 /**
  * Pre-populate the style cache for the given scan scope.
  *
- * Must be called with `await` in START_SCAN BEFORE scanEngine.run().
- * Traverses text nodes to collect unique textStyleIds, then resolves each
- * one via figma.getStyleByIdAsync() (the only available async style API).
+ * MUST be awaited in START_SCAN before scanEngine.run().
  *
- * For 'file' scope, pages are switched via setCurrentPageAsync so every
- * page is covered; the original page is restored when done.
+ * Traverses text nodes to collect unique textStyleIds, then resolves each
+ * via figma.getStyleByIdAsync(). This is the only way to access style
+ * objects (including remote library styles) in dynamic-page plugins.
+ *
+ * For 'file' scope, pages are iterated via setCurrentPageAsync and the
+ * original page is restored before returning.
  */
 export async function preloadStyleCacheAsync(scope: string): Promise<void> {
   const styleIds = new Set<string>()
@@ -54,7 +60,8 @@ export async function preloadStyleCacheAsync(scope: string): Promise<void> {
     for (const node of nodes) {
       if (node.type === 'TEXT') {
         const id = (node as TextNode).textStyleId
-        // textStyleId is a string when uniform, figma.mixed Symbol when mixed
+        // textStyleId is a string when the node has a uniform style,
+        // and figma.mixed (Symbol) when styles differ across ranges.
         if (typeof id === 'string' && id.length > 0) styleIds.add(id)
       }
       if ('children' in node) {
@@ -68,7 +75,7 @@ export async function preloadStyleCacheAsync(scope: string): Promise<void> {
   } else if (scope === 'page') {
     collectFromNodes(figma.currentPage.children)
   } else {
-    // file scope — must switch pages in dynamic-page mode to access each page
+    // file scope — switch pages so dynamic-page mode loads each page
     const startPage = figma.currentPage
     for (const child of figma.root.children) {
       if (child.type === 'PAGE') {
@@ -89,7 +96,8 @@ export async function preloadStyleCacheAsync(scope: string): Promise<void> {
       if (!style) {
         _styleCache.set(styleId, null)
         unresolved++
-        console.log(`[Refactor] preloadStyleCacheAsync: null for id=${styleId} (deleted/missing style)`)
+        // Always log null resolutions — indicates deleted or unavailable styles
+        console.log(`[Refactor] preloadStyleCacheAsync: null id=${styleId} (deleted/unavailable)`)
         continue
       }
 
@@ -99,24 +107,24 @@ export async function preloadStyleCacheAsync(scope: string): Promise<void> {
 
       if (style.type === 'TEXT') {
         const ts = style as unknown as TextStyle
-        // TextStyle.fontName is always FontName (not mixed) on a style object
+        // TextStyle.fontName is always FontName (never mixed) on a style object
         const fn = ts.fontName as FontName
         if (fn && typeof fn.family === 'string') {
           fontFamily = fn.family
           fontStyle  = fn.style
         }
-        // TextStyle.fontSize is always number (not mixed) on a style object
+        // TextStyle.fontSize is always number (never mixed) on a style object
         if (typeof ts.fontSize === 'number') fontSize = ts.fontSize
       }
 
-      _styleCache.set(styleId, {
-        name: style.name, remote: style.remote, key: style.key,
-        fontFamily, fontStyle, fontSize,
-      })
+      const entry = { name: style.name, remote: style.remote, key: style.key, fontFamily, fontStyle, fontSize }
+      _styleCache.set(styleId, entry)
       resolved++
+      if (DEBUG) console.log(`[DEBUG] preload resolved id=${styleId}`, JSON.stringify(entry))
     } catch (err) {
       _styleCache.set(styleId, null)
       unresolved++
+      // Always log errors — indicates API or permission issues
       console.log(`[Refactor] preloadStyleCacheAsync: error id=${styleId}: ${String(err)}`)
     }
   }
@@ -124,11 +132,11 @@ export async function preloadStyleCacheAsync(scope: string): Promise<void> {
   const entries    = [..._styleCache.values()]
   const libCount   = entries.filter(c => c && c.remote).length
   const localCount = entries.filter(c => c && !c.remote).length
-  console.log(`[Refactor] preloadStyleCacheAsync complete: resolved=${resolved} unresolved=${unresolved} local=${localCount} library=${libCount}`)
+  console.log(`[Refactor] preloadStyleCacheAsync complete — resolved=${resolved} unresolved=${unresolved} local=${localCount} library=${libCount}`)
 }
 
 // ---------------------------------------------------------------------------
-// Source resolution
+// Source resolution (cache-only, no Figma API calls)
 // ---------------------------------------------------------------------------
 
 function resolveSource(node: TextNode, textStyleId: string): TypographySource {

@@ -82,45 +82,22 @@ export function AssignmentPanel({ selectedIds, dominant, onClose, initialMode }:
     textCase: dominant.textCase, textDecoration: dominant.textDecoration,
   })
 
-  // Request planning data if not yet loaded
+  // Request planning data if not yet loaded.
+  // Store is invalidated on SCAN_COMPLETE so this always re-fetches after a scan.
   useEffect(() => {
-    console.log('[TRACE UI] AssignmentPanel mount/update: loaded=', loaded, 'loading=', loading, 'textStyles.length=', textStyles.length)
     if (!loaded && !loading) {
-      console.log('[TRACE UI] Requesting GET_PLANNING_DATA...')
       setLoading(true)
       sendToPlugin({ type: 'GET_PLANNING_DATA' })
     }
   }, [loaded, loading, setLoading])
 
-  // Log store snapshot every time textStyles changes
-  useEffect(() => {
-    const localCount   = textStyles.filter(s => s.isLocal).length
-    const libraryCount = textStyles.filter(s => !s.isLocal).length
-    console.log('[TRACE UI] Store snapshot — total:', textStyles.length, 'local:', localCount, 'library:', libraryCount, 'loaded:', loaded, 'loading:', loading)
-    if (textStyles.length > 0) {
-      console.log('[TRACE UI] First 5 store objects:', JSON.stringify(textStyles.slice(0,5)))
-    }
-  }, [textStyles, loaded, loading])
-
-  const filteredStyles = useMemo(() => {
-    console.log('[TRACE UI] filteredStyles memo — input textStyles.length:', textStyles.length, 'styleSearch:', JSON.stringify(styleSearch))
-
-    const result = textStyles.filter(s => {
-      const nameMatch   = s.name.toLowerCase().includes(styleSearch.toLowerCase())
-      const familyMatch = s.fontFamily.toLowerCase().includes(styleSearch.toLowerCase())
-      const passes = nameMatch || familyMatch
-      if (!passes) {
-        console.log('[TRACE UI] FILTERED OUT:', JSON.stringify(s), 'search:', styleSearch)
-      }
-      return passes
-    })
-
-    console.log('[TRACE UI] filteredStyles result:', result.length, 'of', textStyles.length)
-    if (result.length > 0) {
-      console.log('[TRACE UI] filteredStyles first 5:', JSON.stringify(result.slice(0,5)))
-    }
-    return result
-  }, [textStyles, styleSearch])
+  const filteredStyles = useMemo(() =>
+    textStyles.filter(s =>
+      s.name.toLowerCase().includes(styleSearch.toLowerCase()) ||
+      s.fontFamily.toLowerCase().includes(styleSearch.toLowerCase())
+    ),
+    [textStyles, styleSearch]
+  )
 
   const filteredVars = useMemo(() =>
     variables.filter(v => v.name.toLowerCase().includes(varSearch.toLowerCase())),
@@ -128,7 +105,7 @@ export function AssignmentPanel({ selectedIds, dominant, onClose, initialMode }:
   )
 
   function doAssign(target: AssignedTarget) {
-    if (selectedIds.length === 0) { console.warn('[TRACE UI] Assignment skipped: no signatures selected'); return }
+    if (selectedIds.length === 0) return
     assign(selectedIds, target)
     onClose?.()
   }
