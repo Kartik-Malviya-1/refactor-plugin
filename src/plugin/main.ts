@@ -119,9 +119,6 @@ figma.ui.onmessage = async (rawMsg: unknown) => {
     }
 
     case 'GET_PLANNING_DATA': {
-      // Declare accumulators outside try so send() can always reference them.
-      // Each stage has its own inner try-catch so a failure in one does not
-      // prevent the others from running.
       const textStyles: AvailableTextStyle[] = []
       const variables: AvailableTypographyVariable[] = []
 
@@ -132,32 +129,34 @@ figma.ui.onmessage = async (rawMsg: unknown) => {
         localStyleIds = new Set(localStylesList.map(s => s.id))
         for (const s of localStylesList) {
           const fn = s.fontName as FontName
-          textStyles.push({
-            id: s.id, name: s.name,
-            fontFamily: fn.family, fontStyle: fn.style,
-            fontSize: s.fontSize as number,
-            isLocal: true,
-          })
+          textStyles.push({ id: s.id, name: s.name, fontFamily: fn.family, fontStyle: fn.style, fontSize: s.fontSize as number, isLocal: true })
         }
-        console.log(`[Refactor] GET_PLANNING_DATA: ${localStylesList.length} local styles`)
+        console.log(`[TRACE S1] local styles: ${localStylesList.length}`)
+        if (localStylesList.length > 0) {
+          console.log('[TRACE S1] sample:', JSON.stringify(textStyles.slice(0,3)))
+        }
       } catch (err) {
-        console.error('[Refactor] GET_PLANNING_DATA stage 1 (local styles) failed:', err)
+        console.error('[TRACE S1] FAILED:', err)
       }
 
       // ── Stage 2: library styles from scan cache ──────────────────────────
-      // figma.getLocalTextStyles() only returns styles defined in this file.
-      // Library (remote) styles used by text nodes are discovered during scan
-      // via figma.getStyleById() and cached in _styleCache in scanner.ts.
       try {
         const discoveredStyles = getDiscoveredStyles()
-        let libraryCount = 0
+        console.log(`[TRACE S2] _styleCache total entries: ${discoveredStyles.size}`)
+
+        let skipNull = 0, skipLocal = 0, skipDupe = 0, skipNoFont = 0, accepted = 0
+
         for (const [styleId, cached] of discoveredStyles) {
-          if (!cached)                 continue  // unresolved during scan
-          if (!cached.remote)          continue  // local — already in stage 1
-          if (localStyleIds.has(styleId)) continue  // safety dedupe
-          if (!cached.fontFamily || !cached.fontStyle || cached.fontSize == null) continue
+          if (!cached)                     { skipNull++;   continue }
+          if (!cached.remote)              { skipLocal++;  continue }
+          if (localStyleIds.has(styleId))  { skipDupe++;   continue }
+          if (!cached.fontFamily || !cached.fontStyle || cached.fontSize == null) {
+            skipNoFont++
+            console.log(`[TRACE S2] SKIP no-font-props id=${styleId} cached=`, JSON.stringify(cached))
+            continue
+          }
           const segments = cached.name.split('/')
-          textStyles.push({
+          const entry: AvailableTextStyle = {
             id:          styleId,
             name:        cached.name,
             fontFamily:  cached.fontFamily,
@@ -165,12 +164,17 @@ figma.ui.onmessage = async (rawMsg: unknown) => {
             fontSize:    cached.fontSize,
             isLocal:     false,
             libraryName: segments.length > 1 ? segments[0].trim() : undefined,
-          })
-          libraryCount++
+          }
+          textStyles.push(entry)
+          accepted++
+          if (accepted <= 5) {
+            console.log(`[TRACE S2] accepted[${accepted}]:`, JSON.stringify(entry))
+          }
         }
-        console.log(`[Refactor] GET_PLANNING_DATA: ${libraryCount} library styles from cache, ${textStyles.length} total`)
+
+        console.log(`[TRACE S2] cache breakdown — total:${discoveredStyles.size} null:${skipNull} local:${skipLocal} dupe:${skipDupe} no-font:${skipNoFont} accepted:${accepted}`)
       } catch (err) {
-        console.error('[Refactor] GET_PLANNING_DATA stage 2 (library styles) failed:', err)
+        console.error('[TRACE S2] FAILED:', err)
       }
 
       // ── Stage 3: variables ─────────────────────────────────────────────────
@@ -184,11 +188,13 @@ figma.ui.onmessage = async (rawMsg: unknown) => {
             }
           }
         }
-        console.log(`[Refactor] GET_PLANNING_DATA: ${variables.length} variables`)
-      } catch { /* variables API not available in this context */ }
+      } catch { /* variables API not available */ }
 
-      // Always send — even if every stage above failed, the UI gets an empty
-      // payload and clears the loading spinner instead of hanging forever.
+      console.log(`[TRACE S3] PLANNING_DATA payload — textStyles:${textStyles.length} variables:${variables.length}`)
+      if (textStyles.length > 0) {
+        console.log('[TRACE S3] first 5 textStyles:', JSON.stringify(textStyles.slice(0,5)))
+      }
+
       send({ type: 'PLANNING_DATA', payload: { textStyles, variables } })
       break
     }
@@ -218,7 +224,14 @@ figma.ui.onmessage = async (rawMsg: unknown) => {
         const localInCache   = cacheEntries.filter(([, c]) => c && !c.remote).length
         const libraryInCache = cacheEntries.filter(([, c]) => c &&  c.remote).length
         const unresolved     = cacheEntries.filter(([, c]) => c === null).length
-        console.log(`[Refactor] Scan complete — style cache: ${localInCache} local, ${libraryInCache} library, ${unresolved} unresolved`)
+        const noFontProps    = cacheEntries.filter(([, c]) => c && c.remote && (!c.fontFamily || !c.fontStyle || c.fontSize == null)).length
+        console.log(`[TRACE SCAN] cache after scan — total:${cacheEntries.length} local:${localInCache} library:${libraryInCache} unresolved:${unresolved} library-no-font-props:${noFontProps}`)
+
+        // Print first 5 library entries to verify font props are set
+        const libEntries = cacheEntries.filter(([, c]) => c && c.remote).slice(0,5)
+        for (const [id, c] of libEntries) {
+          console.log(`[TRACE SCAN] library cache entry id=${id}`, JSON.stringify(c))
+        }
 
         const scopeLabel = scope === 'selection' ? 'Selection' : scope === 'page' ? figma.currentPage.name : 'Entire File'
         const tSerial = Date.now()

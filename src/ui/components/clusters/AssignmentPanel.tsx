@@ -84,35 +84,40 @@ export function AssignmentPanel({ selectedIds, dominant, onClose, initialMode }:
 
   // Request planning data if not yet loaded
   useEffect(() => {
+    console.log('[TRACE UI] AssignmentPanel mount/update: loaded=', loaded, 'loading=', loading, 'textStyles.length=', textStyles.length)
     if (!loaded && !loading) {
-      console.log('[Refactor] AssignmentPanel: planning data not loaded, requesting...')
+      console.log('[TRACE UI] Requesting GET_PLANNING_DATA...')
       setLoading(true)
       sendToPlugin({ type: 'GET_PLANNING_DATA' })
     }
   }, [loaded, loading, setLoading])
 
-  // Log data pipeline at every stage
+  // Log store snapshot every time textStyles changes
   useEffect(() => {
-    console.log('[Refactor] AssignmentPanel pipeline:', {
-      step1_totalStyles:    textStyles.length,
-      step1_localStyles:    textStyles.filter(s => s.isLocal).length,
-      step1_libraryStyles:  textStyles.filter(s => !s.isLocal).length,
-      step2_variables:      variables.length,
-      initialTab:           initialMode,
-      selectedSignatures:   selectedIds.length,
-      loaded,
-      loading,
-    })
-  }, [textStyles, variables, loaded]) // eslint-disable-line react-hooks/exhaustive-deps
+    const localCount   = textStyles.filter(s => s.isLocal).length
+    const libraryCount = textStyles.filter(s => !s.isLocal).length
+    console.log('[TRACE UI] Store snapshot — total:', textStyles.length, 'local:', localCount, 'library:', libraryCount, 'loaded:', loaded, 'loading:', loading)
+    if (textStyles.length > 0) {
+      console.log('[TRACE UI] First 5 store objects:', JSON.stringify(textStyles.slice(0,5)))
+    }
+  }, [textStyles, loaded, loading])
 
   const filteredStyles = useMemo(() => {
-    const result = textStyles.filter(s =>
-      s.name.toLowerCase().includes(styleSearch.toLowerCase()) ||
-      s.fontFamily.toLowerCase().includes(styleSearch.toLowerCase())
-    )
-    // Log filter stages when searching
-    if (styleSearch) {
-      console.log(`[Refactor] Style filter "${styleSearch}": ${textStyles.length} total → ${result.length} after filter`)
+    console.log('[TRACE UI] filteredStyles memo — input textStyles.length:', textStyles.length, 'styleSearch:', JSON.stringify(styleSearch))
+
+    const result = textStyles.filter(s => {
+      const nameMatch   = s.name.toLowerCase().includes(styleSearch.toLowerCase())
+      const familyMatch = s.fontFamily.toLowerCase().includes(styleSearch.toLowerCase())
+      const passes = nameMatch || familyMatch
+      if (!passes) {
+        console.log('[TRACE UI] FILTERED OUT:', JSON.stringify(s), 'search:', styleSearch)
+      }
+      return passes
+    })
+
+    console.log('[TRACE UI] filteredStyles result:', result.length, 'of', textStyles.length)
+    if (result.length > 0) {
+      console.log('[TRACE UI] filteredStyles first 5:', JSON.stringify(result.slice(0,5)))
     }
     return result
   }, [textStyles, styleSearch])
@@ -123,8 +128,7 @@ export function AssignmentPanel({ selectedIds, dominant, onClose, initialMode }:
   )
 
   function doAssign(target: AssignedTarget) {
-    if (selectedIds.length === 0) { console.warn('[Refactor] Assignment skipped: no signatures selected'); return }
-    console.log('[Refactor] Mapping created:', { count: selectedIds.length, label: target.label, type: target.target.type })
+    if (selectedIds.length === 0) { console.warn('[TRACE UI] Assignment skipped: no signatures selected'); return }
     assign(selectedIds, target)
     onClose?.()
   }
