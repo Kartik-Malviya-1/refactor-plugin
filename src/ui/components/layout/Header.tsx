@@ -9,6 +9,7 @@ const PAGE_TITLE: Record<string, string> = {
   'typography/library':    'Library Styles',
   'typography/local':      'Local Styles',
   'typography/variables':  'Variables',
+  'typography/review':     'Review Changes',
   'typography/signatures': 'Typography Signatures',
   'scan':                  'Scan',
   'settings':              'Settings',
@@ -18,9 +19,9 @@ export function Header() {
   const { currentPage, navigate } = useUIStore()
   const { result, isScanning, cancelScan } = useAuditStore()
 
-  const title = PAGE_TITLE[currentPage] ?? 'Refactor'
+  const title         = PAGE_TITLE[currentPage] ?? 'Refactor'
   const isTypographySub = currentPage.startsWith('typography/') && currentPage !== 'typography/overview'
-  const showRescan = result && !isScanning && currentPage !== 'scan'
+  const showRescan    = result && !isScanning && currentPage !== 'scan'
 
   return (
     <header className="h-11 shrink-0 bg-surface-1 border-b border-border flex items-center px-4 gap-3">

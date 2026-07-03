@@ -2,15 +2,16 @@ import { usePluginMessages } from './hooks/usePluginMessage'
 import { AppShell } from './components/layout/AppShell'
 
 // Typography module pages
-import { TypographyOverview } from './pages/typography/TypographyOverview'
-import { RawValuesPage } from './pages/typography/RawValuesPage'
-import { LibraryStylesPage } from './pages/typography/LibraryStylesPage'
-import { LocalStylesPage } from './pages/typography/LocalStylesPage'
+import { TypographyOverview }   from './pages/typography/TypographyOverview'
+import { RawValuesPage }        from './pages/typography/RawValuesPage'
+import { LibraryStylesPage }    from './pages/typography/LibraryStylesPage'
+import { LocalStylesPage }      from './pages/typography/LocalStylesPage'
 import { TypographyVariablesPage } from './pages/typography/TypographyVariablesPage'
+import { ReviewChangesPage }    from './pages/typography/ReviewChangesPage'
 
 // Preserved pages
-import { AuditPage } from './pages/AuditPage'
-import { ScanPage } from './pages/ScanPage'
+import { AuditPage }  from './pages/AuditPage'
+import { ScanPage }   from './pages/ScanPage'
 
 import { useUIStore } from './store/ui'
 
@@ -29,8 +30,9 @@ export default function App() {
       {currentPage === 'typography/library'    && <LibraryStylesPage />}
       {currentPage === 'typography/local'      && <LocalStylesPage />}
       {currentPage === 'typography/variables'  && <TypographyVariablesPage />}
+      {currentPage === 'typography/review'     && <ReviewChangesPage />}
 
-      {/* Typography Signatures inspector (preserved for navigation from inspector buttons) */}
+      {/* Typography Signatures inspector */}
       {currentPage === 'typography/signatures' && <AuditPage />}
 
       {/* Settings */}

@@ -7,6 +7,7 @@ export type AppPage =
   | 'typography/library'
   | 'typography/local'
   | 'typography/variables'
+  | 'typography/review'       // Review Changes — final review before Apply
   | 'typography/signatures'
   | 'settings'
 
@@ -22,7 +23,6 @@ interface UIState {
   sortField: 'count' | 'family' | 'size'
   sortDirection: 'asc' | 'desc'
   selectionCount: number
-  /** Current Figma page ID — used to detect cross-page selection. */
   currentPageId: string
   toast: { message: string; type: 'success' | 'info' | 'error' } | null
 
@@ -39,23 +39,26 @@ interface UIState {
 }
 
 export const useUIStore = create<UIState>((set, get) => ({
-  currentPage: 'typography/overview',
-  activeModule: 'typography',
-  selectedGroupId: null,
-  inspectorOpen: false,
+  currentPage:      'typography/overview',
+  activeModule:     'typography',
+  selectedGroupId:  null,
+  inspectorOpen:    false,
   expandedGroupIds: new Set(),
-  searchQuery: '',
-  sortField: 'count',
-  sortDirection: 'desc',
-  selectionCount: 0,
-  currentPageId: '',
-  toast: null,
+  searchQuery:      '',
+  sortField:        'count',
+  sortDirection:    'desc',
+  selectionCount:   0,
+  currentPageId:    '',
+  toast:            null,
 
-  navigate: (page) => set({ currentPage: page }),
-  setModule: (m) => { if (m === 'typography') set({ activeModule: m, currentPage: 'typography/overview' }); else set({ activeModule: m }) },
-  setSelectionCount: (n) => set({ selectionCount: n }),
-  setCurrentPageId: (id) => set({ currentPageId: id }),
-  selectGroup: (id) => set({ selectedGroupId: id, inspectorOpen: id !== null }),
+  navigate:          (page) => set({ currentPage: page }),
+  setModule:         (m) => {
+    if (m === 'typography') set({ activeModule: m, currentPage: 'typography/overview' })
+    else set({ activeModule: m })
+  },
+  setSelectionCount: (n)    => set({ selectionCount: n }),
+  setCurrentPageId:  (id)   => set({ currentPageId: id }),
+  selectGroup:       (id)   => set({ selectedGroupId: id, inspectorOpen: id !== null }),
 
   toggleGroupExpand: (id) => {
     const expanded = new Set(get().expandedGroupIds)
@@ -63,13 +66,12 @@ export const useUIStore = create<UIState>((set, get) => ({
     set({ expandedGroupIds: expanded })
   },
 
-  setSearchQuery: (q) => set({ searchQuery: q }),
-  setSort: (field, direction) => set({ sortField: field, sortDirection: direction }),
+  setSearchQuery: (q)             => set({ searchQuery: q }),
+  setSort:        (field, direction) => set({ sortField: field, sortDirection: direction }),
 
   showToast: (message, type = 'info') => {
     set({ toast: { message, type } })
     window.setTimeout(() => set({ toast: null }), 3000)
   },
-
   clearToast: () => set({ toast: null }),
 }))
