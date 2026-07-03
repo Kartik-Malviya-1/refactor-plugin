@@ -27,8 +27,6 @@ interface CachedStyle {
 const _styleCache = new Map<string, CachedStyle | null>()
 
 // Cache-only lookup — pre-populated by preloadStyleCacheAsync().
-// Any styleId not in the cache was not linked to a text node in the
-// scanned scope, or was unresolvable (deleted/missing style).
 function resolveStyle(styleId: string): CachedStyle | null {
   if (_styleCache.has(styleId)) return _styleCache.get(styleId)!
   _styleCache.set(styleId, null)
@@ -39,6 +37,19 @@ export function clearStyleCache(): void { _styleCache.clear() }
 
 export function getDiscoveredStyles(): ReadonlyMap<string, CachedStyle | null> {
   return _styleCache
+}
+
+// ---------------------------------------------------------------------------
+// Preload
+// ---------------------------------------------------------------------------
+
+/** Counts returned by preloadStyleCacheAsync() for coverage reporting. */
+export interface PreloadStats {
+  totalIds:    number  // unique textStyleIds found in scanned text nodes
+  resolved:    number  // figma.getStyleByIdAsync returned a non-null style
+  unresolved:  number  // returned null or threw (deleted/unavailable)
+  localCount:  number  // resolved styles with remote === false
+  libraryCount: number // resolved styles with remote === true
 }
 
 /**
@@ -53,20 +64,16 @@ export function getDiscoveredStyles(): ReadonlyMap<string, CachedStyle | null> {
  * For 'file' scope, pages are iterated via setCurrentPageAsync and the
  * original page is restored before returning.
  */
-export async function preloadStyleCacheAsync(scope: string): Promise<void> {
+export async function preloadStyleCacheAsync(scope: string): Promise<PreloadStats> {
   const styleIds = new Set<string>()
 
   function collectFromNodes(nodes: ReadonlyArray<SceneNode>): void {
     for (const node of nodes) {
       if (node.type === 'TEXT') {
         const id = (node as TextNode).textStyleId
-        // textStyleId is a string when the node has a uniform style,
-        // and figma.mixed (Symbol) when styles differ across ranges.
         if (typeof id === 'string' && id.length > 0) styleIds.add(id)
       }
-      if ('children' in node) {
-        collectFromNodes((node as ChildrenMixin).children)
-      }
+      if ('children' in node) collectFromNodes((node as ChildrenMixin).children)
     }
   }
 
@@ -75,7 +82,6 @@ export async function preloadStyleCacheAsync(scope: string): Promise<void> {
   } else if (scope === 'page') {
     collectFromNodes(figma.currentPage.children)
   } else {
-    // file scope — switch pages so dynamic-page mode loads each page
     const startPage = figma.currentPage
     for (const child of figma.root.children) {
       if (child.type === 'PAGE') {
@@ -96,8 +102,7 @@ export async function preloadStyleCacheAsync(scope: string): Promise<void> {
       if (!style) {
         _styleCache.set(styleId, null)
         unresolved++
-        // Always log null resolutions — indicates deleted or unavailable styles
-        console.log(`[Refactor] preloadStyleCacheAsync: null id=${styleId} (deleted/unavailable)`)
+        console.log(`[Refactor] preload: null id=${styleId} (deleted/unavailable style)`)
         continue
       }
 
@@ -107,13 +112,11 @@ export async function preloadStyleCacheAsync(scope: string): Promise<void> {
 
       if (style.type === 'TEXT') {
         const ts = style as unknown as TextStyle
-        // TextStyle.fontName is always FontName (never mixed) on a style object
         const fn = ts.fontName as FontName
         if (fn && typeof fn.family === 'string') {
           fontFamily = fn.family
           fontStyle  = fn.style
         }
-        // TextStyle.fontSize is always number (never mixed) on a style object
         if (typeof ts.fontSize === 'number') fontSize = ts.fontSize
       }
 
@@ -124,15 +127,16 @@ export async function preloadStyleCacheAsync(scope: string): Promise<void> {
     } catch (err) {
       _styleCache.set(styleId, null)
       unresolved++
-      // Always log errors — indicates API or permission issues
-      console.log(`[Refactor] preloadStyleCacheAsync: error id=${styleId}: ${String(err)}`)
+      console.log(`[Refactor] preload: error id=${styleId}: ${String(err)}`)
     }
   }
 
-  const entries    = [..._styleCache.values()]
-  const libCount   = entries.filter(c => c && c.remote).length
-  const localCount = entries.filter(c => c && !c.remote).length
-  console.log(`[Refactor] preloadStyleCacheAsync complete — resolved=${resolved} unresolved=${unresolved} local=${localCount} library=${libCount}`)
+  const entries     = [..._styleCache.values()]
+  const localCount  = entries.filter(c => c && !c.remote).length
+  const libraryCount = entries.filter(c => c && c.remote).length
+  console.log(`[Refactor] preload complete — resolved=${resolved} unresolved=${unresolved} local=${localCount} library=${libraryCount}`)
+
+  return { totalIds: styleIds.size, resolved, unresolved, localCount, libraryCount }
 }
 
 // ---------------------------------------------------------------------------
@@ -183,6 +187,7 @@ export interface ExtractionInstrument {
   getRangeFontNameCalls: number; getRangeFontSizeCalls: number; getRangeLineHeightCalls: number
   getRangeLetterSpacingCalls: number; getRangeTextCaseCalls: number; getRangeTextDecorationCalls: number
   sharedPluginDataAccesses: number; variableLookups: number
+  extractionCallMs: number
 }
 
 export const _extractionInstrument: ExtractionInstrument = {
@@ -190,6 +195,7 @@ export const _extractionInstrument: ExtractionInstrument = {
   fontNameAccesses: 0, fontSizeAccesses: 0, lineHeightAccesses: 0, letterSpacingAccesses: 0, textCaseAccesses: 0, textDecorationAccesses: 0, textStyleIdAccesses: 0,
   getRangeFontNameCalls: 0, getRangeFontSizeCalls: 0, getRangeLineHeightCalls: 0, getRangeLetterSpacingCalls: 0, getRangeTextCaseCalls: 0, getRangeTextDecorationCalls: 0,
   sharedPluginDataAccesses: 0, variableLookups: 0,
+  extractionCallMs: 0,
 }
 
 export function resetExtractionInstrument(): void {
@@ -197,7 +203,7 @@ export function resetExtractionInstrument(): void {
   e.fontNameMs = 0; e.fontSizeMs = 0; e.lineHeightMs = 0; e.letterSpacingMs = 0; e.textCaseMs = 0; e.textDecorationMs = 0; e.textStyleIdMs = 0
   e.fontNameAccesses = 0; e.fontSizeAccesses = 0; e.lineHeightAccesses = 0; e.letterSpacingAccesses = 0; e.textCaseAccesses = 0; e.textDecorationAccesses = 0; e.textStyleIdAccesses = 0
   e.getRangeFontNameCalls = 0; e.getRangeFontSizeCalls = 0; e.getRangeLineHeightCalls = 0; e.getRangeLetterSpacingCalls = 0; e.getRangeTextCaseCalls = 0; e.getRangeTextDecorationCalls = 0
-  e.sharedPluginDataAccesses = 0; e.variableLookups = 0
+  e.sharedPluginDataAccesses = 0; e.variableLookups = 0; e.extractionCallMs = 0
 }
 
 // ---------------------------------------------------------------------------
@@ -223,6 +229,7 @@ export function extractPropertiesBaseline(node: TextNode): TypographyProperties 
 // ---------------------------------------------------------------------------
 
 export function extractProperties(node: TextNode): TypographyProperties | null {
+  const tStart = Date.now()
   try {
     let _t = Date.now()
     const rawFontName = node.fontName; _extractionInstrument.fontNameMs += Date.now()-_t; _extractionInstrument.fontNameAccesses++
@@ -254,4 +261,5 @@ export function extractProperties(node: TextNode): TypographyProperties | null {
 
     return { fontFamily: intern(fontName.family), fontStyle: intern(fontName.style), fontWeight: styleToWeight(fontName.style), fontSize: Math.round(fontSize*100)/100, lineHeight, letterSpacing, textCase: tc as TypographyProperties['textCase'], textDecoration: td as TypographyProperties['textDecoration'], textStyleId, source }
   } catch { return null }
+  finally { _extractionInstrument.extractionCallMs += Date.now() - tStart }
 }

@@ -3,6 +3,8 @@ import type { PluginToUIMessage } from '../../shared/messages'
 import { useAuditStore } from '../store/audit'
 import { useUIStore } from '../store/ui'
 import { usePlanningDataStore } from '../store/planningData'
+import { useAssignmentStore } from '../store/assignment'
+import { sendToPlugin } from './useSendMessage'
 
 // Shared listener registry — TypographyInspector subscribes here to be
 // notified when the plugin sends SHOW_USAGE_EXPLORER (multi-page selection).
@@ -21,15 +23,29 @@ export function usePluginMessages(): void {
       switch (msg.type) {
         case 'SCAN_PROGRESS': setScanProgress(msg.payload); break
 
-        case 'SCAN_COMPLETE':
+        case 'SCAN_COMPLETE': {
           setScanResult(msg.payload)
           navigate('typography/overview')
-          // The scan just ran, so _styleCache is now warm with library styles.
-          // Clear the planning store so the style picker re-fetches fresh data
-          // the next time AssignmentPanel opens, instead of showing the stale
-          // empty result from the pre-scan load.
+
+          // Invalidate planning data — _styleCache is now warm with fresh data.
+          // The style picker will re-fetch when next opened.
           usePlanningDataStore.getState().clear()
+
+          // Prune assignments for signatures that no longer exist after the scan.
+          // This keeps the assignment store consistent with the new scan result.
+          // Note: correctness depends on group IDs being stable across scans of
+          // the same document (deterministic from normalization key + source).
+          const validIds = new Set<string>(msg.payload.groups.map((g: { id: string }) => g.id))
+          const pruned = useAssignmentStore.getState().pruneOrphans(validIds)
+          if (pruned > 0) console.log(`[Refactor] Pruned ${pruned} orphan assignment(s) after scan`)
+
+          // Performance: pre-fetch planning data immediately while cache is warm.
+          // This pre-warms the style picker so AssignmentPanel opens instantly
+          // instead of showing a loading spinner for the common post-scan path.
+          setPlanningLoading(true)
+          sendToPlugin({ type: 'GET_PLANNING_DATA' })
           break
+        }
 
         case 'SCAN_ERROR':
           setScanError(msg.payload.error)
