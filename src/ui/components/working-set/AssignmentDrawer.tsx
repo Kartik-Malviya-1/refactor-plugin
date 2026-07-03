@@ -1,6 +1,5 @@
 import { useState } from 'react'
 import { X, ChevronUp } from 'lucide-react'
-import { cn } from '../../lib/cn'
 import { AssignmentPanel } from '../clusters/AssignmentPanel'
 import type { TypographyProperties } from '../../../modules/typography/types'
 import type { ConsolidationTargetType } from '../../../shared/migration'
@@ -13,42 +12,55 @@ interface AssignmentDrawerProps {
   onAssigned?:    () => void
 }
 
-const TARGET_OPTIONS: Array<{ type: ConsolidationTargetType; label: string; description: string }> = [
-  { type: 'existing-style',    label: 'Existing Library Style', description: 'Use a style from a shared library' },
-  { type: 'existing-style',    label: 'Existing Local Style',   description: 'Use a style defined in this file'  },
-  { type: 'existing-variable', label: 'Existing Variable',      description: 'Bind to a typography variable'     },
-  { type: 'new-style',         label: 'Create New Style',       description: 'Plan a new text style'             },
-  { type: 'new-variable',      label: 'Create New Variable',    description: 'Plan a new typography variable'    },
-  { type: 'manual-values',     label: 'Manual Values',          description: 'Enter values directly'            },
-  { type: 'skip',              label: 'Skip',                   description: 'Exclude from migration'            },
-]
-
-// Deduplicated target types for the form
-const FORM_TABS: ConsolidationTargetType[] = [
-  'existing-style', 'existing-variable', 'new-style', 'new-variable', 'manual-values', 'skip',
+// Simplified target options. Library vs Local style distinction is handled
+// inside the style picker (user can search the full list of available styles).
+const TARGET_BUTTONS: Array<{ type: ConsolidationTargetType; label: string }> = [
+  { type: 'existing-style',    label: 'Use Existing Style'    },
+  { type: 'existing-variable', label: 'Use Variable'          },
+  { type: 'new-style',         label: 'Create New Style'      },
+  { type: 'new-variable',      label: 'Create New Variable'   },
+  { type: 'manual-values',     label: 'Manual Values'         },
+  { type: 'skip',              label: 'Skip'                  },
 ]
 
 /**
- * AssignmentDrawer — the hero action in the Working Set workflow.
+ * AssignmentDrawer — sticky bottom panel, the hero action in the Working Set workflow.
  *
- * Appears as a sticky bottom panel when Typography Signatures are selected.
- * Shows a selection summary and direct assignment actions.
- * No intermediate clustering step — the Working Set IS the cluster.
+ * Bug fix (v0.2.4): the drawer’s chosen mode is now passed as initialMode
+ * to AssignmentPanel so the correct tab is pre-selected on open.
+ * Previously AssignmentPanel always started in its null state (empty),
+ * requiring the user to click the tab a second time.
  */
 export function AssignmentDrawer({
   selectedIds, selectedGroups, dominant, onDeselect, onAssigned,
 }: AssignmentDrawerProps) {
   const [expanded, setExpanded] = useState(true)
-  const [mode, setMode] = useState<ConsolidationTargetType | null>(null)
+  const [mode, setMode]         = useState<ConsolidationTargetType | null>(null)
 
   const totalLayers = selectedGroups.reduce((s, g) => s + g.count, 0)
-  const pages = new Set(selectedGroups.flatMap(g => g.items.map(i => i.pageId))).size
-  const comps  = selectedGroups.reduce((s, g) => s + g.items.filter(i => i.parentType === 'COMPONENT' || i.parentType === 'INSTANCE').length, 0)
+  const pages       = new Set(selectedGroups.flatMap(g => g.items.map(i => i.pageId))).size
+  const comps       = selectedGroups.reduce(
+    (s, g) => s + g.items.filter(i => i.parentType === 'COMPONENT' || i.parentType === 'INSTANCE').length,
+    0
+  )
 
-  const fallbackDominant: TypographyProperties = dominant ?? {
+  const fallback: TypographyProperties = dominant ?? {
     fontFamily: 'Inter', fontStyle: 'Regular', fontWeight: 400, fontSize: 16,
-    lineHeight: { unit: 'AUTO', value: 0 }, letterSpacing: { unit: 'PIXELS', value: 0 },
-    textCase: 'ORIGINAL', textDecoration: 'NONE', source: { type: 'Raw' },
+    lineHeight: { unit: 'AUTO', value: 0 },
+    letterSpacing: { unit: 'PIXELS', value: 0 },
+    textCase: 'ORIGINAL', textDecoration: 'NONE',
+    source: { type: 'Raw' },
+  }
+
+  function handleButtonClick(type: ConsolidationTargetType) {
+    console.log('[Refactor] Assign button clicked:', type, { selectedIds })
+    setMode(type)
+  }
+
+  function handlePanelClose() {
+    console.log('[Refactor] Assignment panel closed, clearing selection')
+    setMode(null)
+    onAssigned?.()
   }
 
   return (
@@ -62,28 +74,21 @@ export function AssignmentDrawer({
           <span className="ml-2 text-xs text-ink-3">
             {totalLayers.toLocaleString()} layer{totalLayers !== 1 ? 's' : ''}
             {pages > 1 && <> · {pages} pages</>}
-            {comps > 0 && <> · {comps.toLocaleString()} in components</>}
+            {comps > 0  && <> · {comps.toLocaleString()} in components</>}
           </span>
         </div>
-        <div className="flex items-center gap-2">
-          <button
-            onClick={() => setExpanded(!expanded)}
-            className="p-1 rounded text-ink-3 hover:text-ink transition-colors"
-            title={expanded ? 'Collapse' : 'Expand'}
-          >
-            <ChevronUp className={cn('w-3.5 h-3.5 transition-transform', !expanded && 'rotate-180')} />
-          </button>
-          <button
-            onClick={() => { setMode(null); onDeselect() }}
-            className="p-1 rounded text-ink-3 hover:text-ink transition-colors"
-            title="Clear selection"
-          >
-            <X className="w-3.5 h-3.5" />
-          </button>
-        </div>
+        <button onClick={() => setExpanded(!expanded)}
+          className="p-1 rounded text-ink-3 hover:text-ink transition-colors"
+          title={expanded ? 'Collapse' : 'Expand'}>
+          <ChevronUp className={`w-3.5 h-3.5 transition-transform ${!expanded ? 'rotate-180' : ''}`} />
+        </button>
+        <button onClick={() => { setMode(null); onDeselect() }}
+          className="p-1 rounded text-ink-3 hover:text-ink transition-colors"
+          title="Clear selection">
+          <X className="w-3.5 h-3.5" />
+        </button>
       </div>
 
-      {/* Assignment options */}
       {expanded && (
         <div className="border-t border-border-subtle">
           {!mode ? (
@@ -91,31 +96,27 @@ export function AssignmentDrawer({
             <div className="px-4 pb-3 pt-2">
               <p className="text-2xs font-semibold text-ink-disabled uppercase tracking-widest mb-2">Assign to</p>
               <div className="flex flex-wrap gap-1.5">
-                {FORM_TABS.map(type => {
-                  const opt = TARGET_OPTIONS.find(o => o.type === type)
-                  if (!opt) return null
-                  return (
-                    <button
-                      key={type}
-                      onClick={() => setMode(type)}
-                      className="px-3 py-1.5 rounded border border-border bg-surface-0 text-xs font-medium text-ink-2 hover:border-border-strong hover:bg-surface-hover hover:text-ink transition-colors"
-                    >
-                      {opt.label}
-                    </button>
-                  )
-                })}
+                {TARGET_BUTTONS.map(btn => (
+                  <button
+                    key={btn.type}
+                    onClick={() => handleButtonClick(btn.type)}
+                    className="px-3 py-1.5 rounded border border-border bg-surface-0 text-xs font-medium text-ink-2 hover:border-border-strong hover:bg-surface-hover hover:text-ink transition-colors"
+                  >
+                    {btn.label}
+                  </button>
+                ))}
               </div>
             </div>
           ) : (
-            /* Assignment form */
+            // Bug fix: pass initialMode so AssignmentPanel opens on the correct tab.
+            // Previously, AssignmentPanel always started with mode=null (showing
+            // “Choose an assignment type above”) even after the user had clicked a button.
             <AssignmentPanel
               selectedIds={selectedIds}
               clusterId="working-set-selection"
-              dominant={fallbackDominant}
-              onClose={() => {
-                setMode(null)
-                onAssigned?.()
-              }}
+              dominant={fallback}
+              initialMode={mode}
+              onClose={handlePanelClose}
             />
           )}
         </div>

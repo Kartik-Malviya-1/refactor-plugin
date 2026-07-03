@@ -4,14 +4,10 @@ import { useAuditStore } from '../store/audit'
 import { useUIStore } from '../store/ui'
 import { usePlanningDataStore } from '../store/planningData'
 
-// Global flag — TypographyInspector subscribes to this to open Usage Explorer
-export let _showUsageExplorerFlag = false
-export const _usageExplorerListeners: Array<() => void> = []
-
 export function usePluginMessages(): void {
   const { setScanProgress, setScanResult, setScanError } = useAuditStore()
   const { setSelectionCount, setCurrentPageId, showToast, navigate } = useUIStore()
-  const { setData: setPlanningData } = usePlanningDataStore()
+  const { setData: setPlanningData, setLoading: setPlanningLoading } = usePlanningDataStore()
 
   useEffect(() => {
     function handleMessage(event: MessageEvent) {
@@ -51,20 +47,20 @@ export function usePluginMessages(): void {
         case 'NAVIGATION_ERROR': showToast(msg.payload.error, 'error'); break
 
         case 'PLANNING_DATA':
+          // setData() also sets loading = false and loaded = true
           setPlanningData(msg.payload.textStyles, msg.payload.variables)
           break
 
-        // v0.2.1: plugin signals that selections span multiple pages.
-        // Notify any mounted TypographyInspector to open the Usage Explorer.
-        case 'SHOW_USAGE_EXPLORER':
-          _showUsageExplorerFlag = true
+        case 'SHOW_USAGE_EXPLORER': {
+          // Notify any mounted TypographyInspector
+          const { _usageExplorerListeners } = require('./usePluginMessage.listeners')
           for (const cb of _usageExplorerListeners) cb()
-          _showUsageExplorerFlag = false
           break
+        }
       }
     }
 
     window.addEventListener('message', handleMessage)
     return () => window.removeEventListener('message', handleMessage)
-  }, [setScanProgress, setScanResult, setScanError, setSelectionCount, setCurrentPageId, showToast, navigate, setPlanningData])
+  }, [setScanProgress, setScanResult, setScanError, setSelectionCount, setCurrentPageId, showToast, navigate, setPlanningData, setPlanningLoading])
 }
