@@ -2,13 +2,45 @@ import { useMemo, useState } from 'react'
 import { ChevronRight } from 'lucide-react'
 import { useAuditStore } from '../../store/audit'
 import { cn } from '../../lib/cn'
+import { formatLineHeight } from '../../../modules/typography/normalizer'
 import type { AuditGroup } from '../../../shared/types'
 import type { TypographyProperties } from '../../../modules/typography/types'
 
+function SignatureDetail({ group }: { group: AuditGroup<TypographyProperties> }) {
+  const p  = group.descriptor
+  const lh = formatLineHeight(p.lineHeight)
+  return (
+    <div className="flex items-start gap-3 pl-12 pr-4 py-2 border-t border-border-subtle/50 bg-surface-0">
+      <div className="w-1 h-1 rounded-full bg-border-strong shrink-0 mt-1.5" />
+      <div className="flex-1 min-w-0">
+        <p className="text-xs font-medium text-ink">{p.fontFamily}</p>
+        <p className="text-2xs text-ink-3">
+          {p.fontStyle} · {p.fontSize}px{lh !== 'Auto' && <> / {lh}</>}
+        </p>
+      </div>
+      <span className="text-xs tabular-nums text-ink-2 shrink-0">
+        {group.count.toLocaleString()} layer{group.count !== 1 ? 's' : ''}
+      </span>
+    </div>
+  )
+}
+
+interface VariableEntry {
+  varName: string
+  groups: AuditGroup<TypographyProperties>[]
+  totalLayers: number
+}
+
+interface CollectionEntry {
+  collName: string
+  variables: VariableEntry[]
+  totalLayers: number
+}
+
 export function TypographyVariablesPage() {
   const { result } = useAuditStore()
-  const [expandedCollections, setExpandedCollections] = useState<Set<string>>(new Set())
-  const [expandedVars, setExpandedVars] = useState<Set<string>>(new Set())
+  const [expandedColls, setExpandedColls] = useState<Set<string>>(new Set())
+  const [expandedVars,  setExpandedVars]  = useState<Set<string>>(new Set())
 
   const groups = useMemo(() =>
     (result?.groups ?? []) as unknown as AuditGroup<TypographyProperties>[],
@@ -20,14 +52,16 @@ export function TypographyVariablesPage() {
     [groups]
   )
 
-  // Group by collection → variable name
-  const collections = useMemo(() => {
+  // Group by collection → variable name.
+  // Never display variableId (internal identifier) in the primary UI.
+  const collections = useMemo((): CollectionEntry[] => {
     const collMap = new Map<string, Map<string, AuditGroup<TypographyProperties>[]>>()
 
     for (const group of variableGroups) {
-      const src = group.descriptor.source
+      const src        = group.descriptor.source
       const collection = src?.variableCollection ?? 'Unknown Collection'
-      const varName = src?.variableName ?? 'Unknown Variable'
+      // Human-readable variable name only
+      const varName    = src?.variableName ?? 'Unnamed Variable'
 
       if (!collMap.has(collection)) collMap.set(collection, new Map())
       const varMap = collMap.get(collection)!
@@ -35,23 +69,31 @@ export function TypographyVariablesPage() {
       varMap.get(varName)!.push(group)
     }
 
-    return [...collMap.entries()].map(([collName, varMap]) => ({
-      collName,
-      variables: [...varMap.entries()].map(([varName, varGroups]) => ({
-        varName,
-        groups: varGroups,
-        totalLayers: varGroups.reduce((s, g) => s + g.count, 0),
-      })).sort((a, b) => b.totalLayers - a.totalLayers),
-      totalLayers: [...varMap.values()].flat().reduce((s, g) => s + g.count, 0),
-    })).sort((a, b) => b.totalLayers - a.totalLayers)
+    return [...collMap.entries()]
+      .map(([collName, varMap]): CollectionEntry => {
+        const variables: VariableEntry[] = [...varMap.entries()]
+          .map(([varName, varGroups]) => ({
+            varName,
+            groups:      varGroups,
+            totalLayers: varGroups.reduce((s, g) => s + g.count, 0),
+          }))
+          .sort((a, b) => b.totalLayers - a.totalLayers)
+
+        return {
+          collName,
+          variables,
+          totalLayers: variables.reduce((s, v) => s + v.totalLayers, 0),
+        }
+      })
+      .sort((a, b) => b.totalLayers - a.totalLayers)
   }, [variableGroups])
 
   const totalLayers = variableGroups.reduce((s, g) => s + g.count, 0)
 
   function toggleColl(name: string) {
-    const next = new Set(expandedCollections)
+    const next = new Set(expandedColls)
     if (next.has(name)) next.delete(name); else next.add(name)
-    setExpandedCollections(next)
+    setExpandedColls(next)
   }
   function toggleVar(key: string) {
     const next = new Set(expandedVars)
@@ -59,13 +101,21 @@ export function TypographyVariablesPage() {
     setExpandedVars(next)
   }
 
-  if (!result) return <div className="flex items-center justify-center h-full"><p className="text-xs text-ink-disabled">No scan data.</p></div>
+  if (!result) return (
+    <div className="flex items-center justify-center h-full">
+      <p className="text-xs text-ink-disabled">No scan data. Run a scan first.</p>
+    </div>
+  )
 
   return (
     <div className="flex flex-col h-full overflow-hidden">
       <div className="shrink-0 px-5 py-3 border-b border-border-subtle bg-surface-1">
         <p className="text-base font-semibold text-ink">Variables</p>
-        <p className="text-xs text-ink-3 mt-0.5">{totalLayers.toLocaleString()} layers · {variableGroups.length} signatures</p>
+        <p className="text-xs text-ink-3 mt-0.5">
+          {totalLayers.toLocaleString()} layers ·
+          {' '}{variableGroups.length} signature{variableGroups.length !== 1 ? 's' : ''} ·
+          {' '}{collections.length} collection{collections.length !== 1 ? 's' : ''}
+        </p>
       </div>
 
       <div className="flex-1 overflow-y-auto">
@@ -73,40 +123,54 @@ export function TypographyVariablesPage() {
           <div className="flex flex-col items-center justify-center h-full gap-2 p-8 text-center">
             <p className="text-sm font-medium text-ink">No typography variables detected</p>
             <p className="text-xs text-ink-3 leading-relaxed max-w-xs">
-              Variables appear when text layers are bound to Figma variables for font family, size, or other properties.
+              Variables appear when text layers are bound to Figma variables.
             </p>
           </div>
         ) : collections.map(coll => (
           <div key={coll.collName} className="border-b border-border-subtle">
-            <button onClick={() => toggleColl(coll.collName)}
-              className="w-full flex items-center gap-3 px-4 py-3 hover:bg-surface-hover transition-colors text-left">
-              <ChevronRight className={cn('w-3.5 h-3.5 text-ink-3 shrink-0 transition-transform', expandedCollections.has(coll.collName) && 'rotate-90')} />
+            {/* Collection header */}
+            <button
+              onClick={() => toggleColl(coll.collName)}
+              className="w-full flex items-center gap-3 px-4 py-3 hover:bg-surface-hover transition-colors text-left"
+            >
+              <ChevronRight className={cn(
+                'w-3.5 h-3.5 text-ink-3 shrink-0 transition-transform',
+                expandedColls.has(coll.collName) && 'rotate-90'
+              )} />
               <div className="flex-1 min-w-0">
-                <p className="text-sm font-medium text-ink truncate">{coll.collName}</p>
-                <p className="text-2xs text-ink-3">{coll.variables.length} variable{coll.variables.length !== 1 ? 's' : ''} · {coll.totalLayers.toLocaleString()} layers</p>
+                <p className="text-sm font-semibold text-ink truncate">{coll.collName}</p>
+                <p className="text-2xs text-ink-3">
+                  {coll.variables.length} variable{coll.variables.length !== 1 ? 's' : ''} ·
+                  {' '}{coll.totalLayers.toLocaleString()} layers
+                </p>
               </div>
             </button>
 
-            {expandedCollections.has(coll.collName) && coll.variables.map(v => {
+            {/* Variables */}
+            {expandedColls.has(coll.collName) && coll.variables.map(v => {
               const varKey = `${coll.collName}::${v.varName}`
+              const isExpanded = expandedVars.has(varKey)
               return (
-                <div key={v.varName} className="pl-4 border-t border-border-subtle/50">
-                  <button onClick={() => toggleVar(varKey)}
-                    className="w-full flex items-center gap-3 px-3 py-2.5 hover:bg-surface-hover transition-colors text-left">
-                    <ChevronRight className={cn('w-3 h-3 text-ink-3 shrink-0 transition-transform', expandedVars.has(varKey) && 'rotate-90')} />
+                <div key={v.varName} className="border-t border-border-subtle/60">
+                  <button
+                    onClick={() => toggleVar(varKey)}
+                    className="w-full flex items-center gap-3 pl-8 pr-4 py-2.5 hover:bg-surface-hover transition-colors text-left"
+                  >
+                    <ChevronRight className={cn(
+                      'w-3 h-3 text-ink-3 shrink-0 transition-transform',
+                      isExpanded && 'rotate-90'
+                    )} />
                     <div className="flex-1 min-w-0">
-                      <p className="text-xs font-medium text-ink truncate">{v.varName}</p>
-                      <p className="text-2xs text-ink-3">{v.groups.length} signature{v.groups.length !== 1 ? 's' : ''} · {v.totalLayers.toLocaleString()} layers</p>
+                      <p className="text-sm font-medium text-ink truncate">{v.varName}</p>
+                      <p className="text-2xs text-ink-3">
+                        {v.totalLayers.toLocaleString()} layer{v.totalLayers !== 1 ? 's' : ''} ·
+                        {' '}{v.groups.length} signature{v.groups.length !== 1 ? 's' : ''}
+                      </p>
                     </div>
                   </button>
 
-                  {expandedVars.has(varKey) && v.groups.map(group => (
-                    <div key={group.id} className="flex items-center gap-3 pl-10 pr-4 py-2 bg-surface-0 border-t border-border-subtle/50 text-xs">
-                      <div className="flex-1 min-w-0">
-                        <p className="font-medium text-ink truncate">{group.descriptor.fontFamily} {group.descriptor.fontStyle} / {group.descriptor.fontSize}px</p>
-                        <p className="text-ink-3">{group.count.toLocaleString()} layers</p>
-                      </div>
-                    </div>
+                  {isExpanded && v.groups.map(group => (
+                    <SignatureDetail key={group.id} group={group} />
                   ))}
                 </div>
               )
