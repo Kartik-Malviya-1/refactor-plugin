@@ -1,13 +1,17 @@
 import { usePluginMessages } from './hooks/usePluginMessage'
 import { AppShell } from './components/layout/AppShell'
-import { OverviewPage } from './pages/OverviewPage'
-import { ScanPage } from './pages/ScanPage'
+
+// Typography module pages
+import { TypographyOverview } from './pages/typography/TypographyOverview'
+import { RawValuesPage } from './pages/typography/RawValuesPage'
+import { LibraryStylesPage } from './pages/typography/LibraryStylesPage'
+import { LocalStylesPage } from './pages/typography/LocalStylesPage'
+import { TypographyVariablesPage } from './pages/typography/TypographyVariablesPage'
+
+// Preserved pages
 import { AuditPage } from './pages/AuditPage'
-import { SourcesPage } from './pages/SourcesPage'
-import { ClustersPage } from './pages/ClustersPage'
-import { PlanningPage } from './pages/PlanningPage'
-import { MigrationPreviewPage } from './pages/MigrationPreviewPage'
-import { SimulationPage } from './pages/SimulationPage'
+import { ScanPage } from './pages/ScanPage'
+
 import { useUIStore } from './store/ui'
 
 export default function App() {
@@ -16,15 +20,21 @@ export default function App() {
 
   return (
     <AppShell>
-      {currentPage === 'overview'    && <OverviewPage />}
-      {currentPage === 'scan'        && <ScanPage />}
-      {currentPage === 'signatures'  && <AuditPage />}
-      {currentPage === 'sources'     && <SourcesPage />}
-      {currentPage === 'clusters'    && <ClustersPage />}
-      {currentPage === 'planning'    && <PlanningPage />}
-      {currentPage === 'preview'     && <MigrationPreviewPage />}
-      {currentPage === 'simulation'  && <SimulationPage />}
-      {currentPage === 'settings'    && (
+      {/* Scan */}
+      {currentPage === 'scan' && <ScanPage />}
+
+      {/* Typography module */}
+      {currentPage === 'typography/overview'   && <TypographyOverview />}
+      {currentPage === 'typography/raw'        && <RawValuesPage />}
+      {currentPage === 'typography/library'    && <LibraryStylesPage />}
+      {currentPage === 'typography/local'      && <LocalStylesPage />}
+      {currentPage === 'typography/variables'  && <TypographyVariablesPage />}
+
+      {/* Typography Signatures inspector (preserved for navigation from inspector buttons) */}
+      {currentPage === 'typography/signatures' && <AuditPage />}
+
+      {/* Settings */}
+      {currentPage === 'settings' && (
         <div className="flex items-center justify-center h-full">
           <div className="text-center">
             <p className="text-sm font-medium text-ink">Settings</p>

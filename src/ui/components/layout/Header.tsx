@@ -1,36 +1,61 @@
-import { ChevronRight, RotateCcw, X } from 'lucide-react'
+import { RotateCcw, X } from 'lucide-react'
 import { Button } from '../ui/Button'
 import { useUIStore } from '../../store/ui'
 import { useAuditStore } from '../../store/audit'
+
+const PAGE_TITLE: Record<string, string> = {
+  'typography/overview':   'Typography',
+  'typography/raw':        'Raw Values',
+  'typography/library':    'Library Styles',
+  'typography/local':      'Local Styles',
+  'typography/variables':  'Variables',
+  'typography/signatures': 'Typography Signatures',
+  'scan':                  'Scan',
+  'settings':              'Settings',
+}
 
 export function Header() {
   const { currentPage, navigate } = useUIStore()
   const { result, isScanning, cancelScan } = useAuditStore()
 
-  const showRescan =
-    (['signatures','sources','clusters','planning','preview','simulation','overview'] as typeof currentPage[]).includes(currentPage) &&
-    result && !isScanning
-
-  const OV = () => <button onClick={() => navigate('overview')} className="hover:text-ink transition-colors">Overview</button>
-  const CR = () => <ChevronRight className="w-3.5 h-3.5 shrink-0" />
+  const title = PAGE_TITLE[currentPage] ?? 'Refactor'
+  const isTypographySub = currentPage.startsWith('typography/') && currentPage !== 'typography/overview'
+  const showRescan = result && !isScanning && currentPage !== 'scan'
 
   return (
     <header className="h-11 shrink-0 bg-surface-1 border-b border-border flex items-center px-4 gap-3">
-      <div className="flex items-center gap-1 text-sm text-ink-3 min-w-0">
-        {currentPage === 'overview'   && <span className="font-medium text-ink">Overview</span>}
-        {currentPage === 'scan'       && (<><OV /><CR /><span className="font-medium text-ink">Scan</span></>)}
-        {currentPage === 'signatures' && (<><OV /><CR /><span className="font-medium text-ink">Typography Signatures</span>{result && (<><CR /><span className="text-ink-3 truncate max-w-[100px]">{result.scopeLabel}</span></>)}</>)}
-        {currentPage === 'sources'    && (<><OV /><CR /><span className="font-medium text-ink">Sources</span></>)}
-        {currentPage === 'clusters'   && (<><OV /><CR /><span className="font-medium text-ink">Typography Clusters</span></>)}
-        {currentPage === 'planning'   && (<><OV /><CR /><span className="font-medium text-ink">Planning (Legacy)</span></>)}
-        {currentPage === 'preview'    && (<><OV /><CR /><span className="font-medium text-ink">Migration Preview</span></>)}
-        {currentPage === 'simulation' && (<><OV /><CR /><span className="font-medium text-ink">Simulation</span></>)}
-        {currentPage === 'settings'   && <span className="font-medium text-ink">Settings</span>}
+      <div className="flex items-center gap-1.5 text-sm min-w-0">
+        {isTypographySub ? (
+          <>
+            <button
+              onClick={() => navigate('typography/overview')}
+              className="text-ink-3 hover:text-ink transition-colors"
+            >
+              Typography
+            </button>
+            <span className="text-ink-disabled">/</span>
+            <span className="font-medium text-ink">{title}</span>
+          </>
+        ) : (
+          <span className="font-medium text-ink">{title}</span>
+        )}
       </div>
+
       <div className="flex-1" />
-      {isScanning && (<Button variant="ghost" size="sm" onClick={cancelScan}><X className="w-3.5 h-3.5" />Cancel</Button>)}
-      {showRescan  && (<Button variant="ghost" size="sm" onClick={() => navigate('scan')}><RotateCcw className="w-3 h-3" />Re-scan</Button>)}
-      {currentPage === 'overview' && !result && !isScanning && (
+
+      {isScanning && (
+        <Button variant="ghost" size="sm" onClick={cancelScan}>
+          <X className="w-3.5 h-3.5" />Cancel
+        </Button>
+      )}
+
+      {showRescan && (
+        <Button variant="ghost" size="sm" onClick={() => navigate('scan')}>
+          <RotateCcw className="w-3 h-3" />Re-scan
+        </Button>
+      )}
+
+      {!result && !isScanning && currentPage !== 'scan' && (
         <Button variant="primary" size="sm" onClick={() => navigate('scan')}>Run Scan</Button>
       )}
     </header>

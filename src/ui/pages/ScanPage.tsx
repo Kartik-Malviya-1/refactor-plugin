@@ -11,7 +11,7 @@ import { cn } from '../lib/cn'
 const SCOPE_OPTIONS: { id: ScanScope; label: string; description: string; icon: React.ElementType; warning?: string }[] = [
   { id: 'selection', label: 'Current Selection', description: 'Scan only the currently selected layers and their children.', icon: Layers },
   { id: 'page',      label: 'Current Page',      description: 'Scan all text layers on the active Figma page.', icon: FileText },
-  { id: 'file',      label: 'Entire File',        description: 'Scan across every page. May take longer for large files.', icon: FolderOpen, warning: 'Large files may take a while. Each page must be loaded.' },
+  { id: 'file',      label: 'Entire File',        description: 'Scan across every page. May take longer for large files.', icon: FolderOpen, warning: 'Large files may take a while.' },
 ]
 
 export function ScanPage() {
@@ -19,15 +19,10 @@ export function ScanPage() {
   const { selectionCount, navigate } = useUIStore()
   const { isScanning, scanProgress, startScan, cancelScan } = useAuditStore()
 
-  useEffect(() => {
-    sendToPlugin({ type: 'GET_SELECTION_INFO' })
-  }, [])
+  useEffect(() => { sendToPlugin({ type: 'GET_SELECTION_INFO' }) }, [])
 
   if (isScanning) {
-    const pct = scanProgress && scanProgress.total > 0
-      ? Math.round((scanProgress.current / scanProgress.total) * 100)
-      : null
-
+    const pct = scanProgress && scanProgress.total > 0 ? Math.round((scanProgress.current / scanProgress.total) * 100) : null
     return (
       <div className="flex flex-col items-center justify-center h-full gap-4 p-8">
         <Spinner size="lg" />
@@ -56,7 +51,7 @@ export function ScanPage() {
       <div className="flex-1 p-5">
         <div className="mb-4">
           <p className="text-sm font-semibold text-ink mb-0.5">Choose scan scope</p>
-          <p className="text-xs text-ink-3">Narrower scopes are faster. Start with a page for most workflows.</p>
+          <p className="text-xs text-ink-3">Narrower scopes are faster.</p>
         </div>
         <div className="flex flex-col gap-2">
           {SCOPE_OPTIONS.map((opt) => {
@@ -64,16 +59,10 @@ export function ScanPage() {
             const isDisabled = opt.id === 'selection' && selectionCount === 0
             const isSelected = scope === opt.id
             return (
-              <button
-                key={opt.id}
-                onClick={() => !isDisabled && setScope(opt.id)}
-                disabled={isDisabled}
-                className={cn(
-                  'w-full text-left flex items-start gap-3 p-3 rounded-lg border transition-colors duration-120',
+              <button key={opt.id} onClick={() => !isDisabled && setScope(opt.id)} disabled={isDisabled}
+                className={cn('w-full text-left flex items-start gap-3 p-3 rounded-lg border transition-colors',
                   isSelected ? 'border-accent bg-accent-subtle' : 'border-border bg-surface-1 hover:border-border-strong hover:bg-surface-hover',
-                  isDisabled && 'opacity-40 cursor-not-allowed'
-                )}
-              >
+                  isDisabled && 'opacity-40 cursor-not-allowed')}>
                 <div className={cn('w-4 h-4 rounded-full border-2 flex items-center justify-center shrink-0 mt-0.5', isSelected ? 'border-accent' : 'border-border-strong')}>
                   {isSelected && <div className="w-1.5 h-1.5 rounded-full bg-accent" />}
                 </div>
@@ -81,12 +70,8 @@ export function ScanPage() {
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2">
                     <p className={cn('text-sm font-medium', isSelected ? 'text-accent' : 'text-ink')}>{opt.label}</p>
-                    {opt.id === 'selection' && selectionCount > 0 && (
-                      <span className="text-2xs text-ink-3">({selectionCount} layer{selectionCount !== 1 ? 's' : ''})</span>
-                    )}
-                    {opt.id === 'selection' && selectionCount === 0 && (
-                      <span className="text-2xs text-ink-disabled">No selection</span>
-                    )}
+                    {opt.id === 'selection' && selectionCount > 0 && <span className="text-2xs text-ink-3">({selectionCount} layer{selectionCount !== 1 ? 's' : ''})</span>}
+                    {opt.id === 'selection' && selectionCount === 0 && <span className="text-2xs text-ink-disabled">No selection</span>}
                   </div>
                   <p className="text-xs text-ink-3 mt-0.5 leading-relaxed">{opt.description}</p>
                   {opt.warning && isSelected && <p className="text-2xs text-warning mt-1">{opt.warning}</p>}
@@ -97,7 +82,7 @@ export function ScanPage() {
         </div>
       </div>
       <div className="shrink-0 border-t border-border-subtle px-5 py-3 bg-surface-1 flex items-center justify-between gap-3">
-        <Button variant="ghost" size="md" onClick={() => navigate('overview')}>Cancel</Button>
+        <Button variant="ghost" size="md" onClick={() => navigate('typography/overview')}>Cancel</Button>
         <Button variant="primary" size="md" onClick={() => startScan('typography', scope)}>
           Start Scan<ChevronRight className="w-3.5 h-3.5" />
         </Button>

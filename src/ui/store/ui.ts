@@ -1,25 +1,39 @@
 import { create } from 'zustand'
 
+/**
+ * App pages after v0.2 information architecture redesign.
+ * Top-level concepts (Sources, Preview, Simulation) are removed from nav.
+ * Typography module has its own sub-pages.
+ */
 export type AppPage =
-  | 'overview' | 'scan' | 'signatures' | 'sources'
-  | 'clusters'     // Typography Clusters (new primary planning workspace)
-  | 'planning'     // kept for backward compat with Preview/Simulation
-  | 'preview' | 'simulation' | 'settings'
+  | 'scan'
+  | 'typography/overview'    // Typography module home — clickable summary cards
+  | 'typography/raw'         // Raw Values detail (All + Clusters tabs)
+  | 'typography/library'     // Library Styles detail
+  | 'typography/local'       // Local Styles detail
+  | 'typography/variables'   // Typography Variables detail
+  | 'typography/signatures'  // Typography Signatures inspector (preserved)
+  | 'settings'
+
+export type ActiveModule = 'typography' | 'colors' | 'spacing' | 'radius' | 'effects' | 'variables-module'
 
 interface UIState {
   currentPage: AppPage
-  activeModuleId: string
-  selectionCount: number
+  activeModule: ActiveModule
+
+  // Typography Signatures inspector state (preserved from previous sprints)
   selectedGroupId: string | null
   inspectorOpen: boolean
   expandedGroupIds: Set<string>
   searchQuery: string
   sortField: 'count' | 'family' | 'size'
   sortDirection: 'asc' | 'desc'
+  selectionCount: number
+
   toast: { message: string; type: 'success' | 'info' | 'error' } | null
 
   navigate: (page: AppPage) => void
-  setActiveModule: (id: string) => void
+  setModule: (m: ActiveModule) => void
   setSelectionCount: (n: number) => void
   selectGroup: (id: string | null) => void
   toggleGroupExpand: (id: string) => void
@@ -30,19 +44,25 @@ interface UIState {
 }
 
 export const useUIStore = create<UIState>((set, get) => ({
-  currentPage: 'overview',
-  activeModuleId: 'typography',
-  selectionCount: 0,
+  currentPage: 'typography/overview',
+  activeModule: 'typography',
   selectedGroupId: null,
   inspectorOpen: false,
   expandedGroupIds: new Set(),
   searchQuery: '',
   sortField: 'count',
   sortDirection: 'desc',
+  selectionCount: 0,
   toast: null,
 
   navigate: (page) => set({ currentPage: page }),
-  setActiveModule: (id) => set({ activeModuleId: id }),
+
+  setModule: (m) => {
+    // Navigating to a module sets the relevant landing page
+    if (m === 'typography') set({ activeModule: m, currentPage: 'typography/overview' })
+    else set({ activeModule: m })  // coming soon modules don’t change page
+  },
+
   setSelectionCount: (n) => set({ selectionCount: n }),
   selectGroup: (id) => set({ selectedGroupId: id, inspectorOpen: id !== null }),
 

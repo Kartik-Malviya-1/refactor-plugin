@@ -19,7 +19,7 @@ export function usePluginMessages(): void {
 
         case 'SCAN_COMPLETE':
           setScanResult(msg.payload)
-          navigate('overview')
+          navigate('typography/overview')  // v0.2: land on typography overview
           break
 
         case 'SCAN_ERROR':
@@ -49,7 +49,6 @@ export function usePluginMessages(): void {
           showToast(msg.payload.error, 'error')
           break
 
-        // Sprint 4: planning data (available styles + variables)
         case 'PLANNING_DATA':
           setPlanningData(msg.payload.textStyles, msg.payload.variables)
           break
