@@ -8,19 +8,23 @@ export function Header() {
   const { result, isScanning, cancelScan } = useAuditStore()
 
   const showRescan =
-    (['signatures','sources','planning','preview','simulation','overview'] as typeof currentPage[]).includes(currentPage) &&
+    (['signatures','sources','clusters','planning','preview','simulation','overview'] as typeof currentPage[]).includes(currentPage) &&
     result && !isScanning
+
+  const OV = () => <button onClick={() => navigate('overview')} className="hover:text-ink transition-colors">Overview</button>
+  const CR = () => <ChevronRight className="w-3.5 h-3.5 shrink-0" />
 
   return (
     <header className="h-11 shrink-0 bg-surface-1 border-b border-border flex items-center px-4 gap-3">
       <div className="flex items-center gap-1 text-sm text-ink-3 min-w-0">
         {currentPage === 'overview'   && <span className="font-medium text-ink">Overview</span>}
-        {currentPage === 'scan'       && (<><button onClick={() => navigate('overview')} className="hover:text-ink transition-colors">Overview</button><ChevronRight className="w-3.5 h-3.5 shrink-0" /><span className="font-medium text-ink">Scan</span></>)}
-        {currentPage === 'signatures' && (<><button onClick={() => navigate('overview')} className="hover:text-ink transition-colors">Overview</button><ChevronRight className="w-3.5 h-3.5 shrink-0" /><span className="font-medium text-ink">Typography Signatures</span>{result && (<><ChevronRight className="w-3.5 h-3.5 shrink-0" /><span className="text-ink-3 truncate max-w-[120px]">{result.scopeLabel}</span></>)}</>)}
-        {currentPage === 'sources'    && (<><button onClick={() => navigate('overview')} className="hover:text-ink transition-colors">Overview</button><ChevronRight className="w-3.5 h-3.5 shrink-0" /><span className="font-medium text-ink">Sources</span></>)}
-        {currentPage === 'planning'   && (<><button onClick={() => navigate('overview')} className="hover:text-ink transition-colors">Overview</button><ChevronRight className="w-3.5 h-3.5 shrink-0" /><span className="font-medium text-ink">Design System Planning</span></>)}
-        {currentPage === 'preview'    && (<><button onClick={() => navigate('overview')} className="hover:text-ink transition-colors">Overview</button><ChevronRight className="w-3.5 h-3.5 shrink-0" /><span className="font-medium text-ink">Migration Preview</span></>)}
-        {currentPage === 'simulation' && (<><button onClick={() => navigate('overview')} className="hover:text-ink transition-colors">Overview</button><ChevronRight className="w-3.5 h-3.5 shrink-0" /><span className="font-medium text-ink">Simulation</span></>)}
+        {currentPage === 'scan'       && (<><OV /><CR /><span className="font-medium text-ink">Scan</span></>)}
+        {currentPage === 'signatures' && (<><OV /><CR /><span className="font-medium text-ink">Typography Signatures</span>{result && (<><CR /><span className="text-ink-3 truncate max-w-[100px]">{result.scopeLabel}</span></>)}</>)}
+        {currentPage === 'sources'    && (<><OV /><CR /><span className="font-medium text-ink">Sources</span></>)}
+        {currentPage === 'clusters'   && (<><OV /><CR /><span className="font-medium text-ink">Typography Clusters</span></>)}
+        {currentPage === 'planning'   && (<><OV /><CR /><span className="font-medium text-ink">Planning (Legacy)</span></>)}
+        {currentPage === 'preview'    && (<><OV /><CR /><span className="font-medium text-ink">Migration Preview</span></>)}
+        {currentPage === 'simulation' && (<><OV /><CR /><span className="font-medium text-ink">Simulation</span></>)}
         {currentPage === 'settings'   && <span className="font-medium text-ink">Settings</span>}
       </div>
       <div className="flex-1" />

@@ -2,7 +2,9 @@ import { create } from 'zustand'
 
 export type AppPage =
   | 'overview' | 'scan' | 'signatures' | 'sources'
-  | 'planning' | 'preview' | 'simulation' | 'settings'
+  | 'clusters'     // Typography Clusters (new primary planning workspace)
+  | 'planning'     // kept for backward compat with Preview/Simulation
+  | 'preview' | 'simulation' | 'settings'
 
 interface UIState {
   currentPage: AppPage

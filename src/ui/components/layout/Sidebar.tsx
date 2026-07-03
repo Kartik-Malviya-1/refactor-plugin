@@ -5,29 +5,21 @@ import { cn } from '../../lib/cn'
 import { useUIStore, type AppPage } from '../../store/ui'
 import { useAuditStore } from '../../store/audit'
 
-interface NavItem {
-  id: AppPage
-  label: string
-  icon: React.ElementType
-  available: boolean
-  requiresScan?: boolean
-}
+interface NavItem { id: AppPage; label: string; icon: React.ElementType; available: boolean; requiresScan?: boolean }
 
 const WORKSPACE_NAV: NavItem[] = [
-  { id: 'overview',   label: 'Overview',                icon: LayoutDashboard, available: true },
-  { id: 'signatures', label: 'Typography Signatures',  icon: Type,            available: true, requiresScan: true },
-  { id: 'sources',    label: 'Sources',                icon: Layers,          available: true, requiresScan: true },
-  { id: 'planning',   label: 'Design System Planning', icon: GitBranch,       available: true, requiresScan: true },
+  { id: 'overview',    label: 'Overview',                icon: LayoutDashboard, available: true },
+  { id: 'signatures',  label: 'Typography Signatures',  icon: Type,            available: true, requiresScan: true },
+  { id: 'sources',     label: 'Sources',                icon: Layers,          available: true, requiresScan: true },
+  { id: 'clusters',    label: 'Typography Clusters',    icon: GitBranch,       available: true, requiresScan: true },
 ]
 
 const MIGRATION_NAV: NavItem[] = [
-  { id: 'preview',    label: 'Migration Preview',  icon: GitMerge,    available: true, requiresScan: true },
-  { id: 'simulation', label: 'Simulation',         icon: FlaskConical, available: true, requiresScan: true },
+  { id: 'preview',    label: 'Migration Preview', icon: GitMerge,    available: true, requiresScan: true },
+  { id: 'simulation', label: 'Simulation',        icon: FlaskConical, available: true, requiresScan: true },
 ]
 
-const DISABLED_NAV = [
-  { label: 'Migration Execution', icon: Play },
-]
+const DISABLED_NAV = [{ label: 'Apply', icon: Play }]
 
 export function Sidebar() {
   const { currentPage, navigate } = useUIStore()
@@ -39,7 +31,7 @@ export function Sidebar() {
     navigate(item.id)
   }
 
-  function navButton(item: NavItem) {
+  function navBtn(item: NavItem) {
     const Icon = item.icon
     const isActive = currentPage === item.id
     return (
@@ -66,12 +58,12 @@ export function Sidebar() {
       </div>
 
       <nav className="flex-1 overflow-y-auto py-2 px-2">
-        <p className="px-2 py-1.5 text-2xs font-semibold text-ink-disabled uppercase tracking-widest">Discovery & Planning</p>
-        {WORKSPACE_NAV.map(navButton)}
+        <p className="px-2 py-1.5 text-2xs font-semibold text-ink-disabled uppercase tracking-widest">Discovery & Clustering</p>
+        {WORKSPACE_NAV.map(navBtn)}
 
         <div className="my-2 mx-2 border-t border-border-subtle" />
         <p className="px-2 py-1 text-2xs font-semibold text-ink-disabled uppercase tracking-widest">Migration</p>
-        {MIGRATION_NAV.map(navButton)}
+        {MIGRATION_NAV.map(navBtn)}
         {DISABLED_NAV.map(item => {
           const Icon = item.icon
           return (

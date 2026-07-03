@@ -4,6 +4,7 @@ import { OverviewPage } from './pages/OverviewPage'
 import { ScanPage } from './pages/ScanPage'
 import { AuditPage } from './pages/AuditPage'
 import { SourcesPage } from './pages/SourcesPage'
+import { ClustersPage } from './pages/ClustersPage'
 import { PlanningPage } from './pages/PlanningPage'
 import { MigrationPreviewPage } from './pages/MigrationPreviewPage'
 import { SimulationPage } from './pages/SimulationPage'
@@ -19,6 +20,7 @@ export default function App() {
       {currentPage === 'scan'        && <ScanPage />}
       {currentPage === 'signatures'  && <AuditPage />}
       {currentPage === 'sources'     && <SourcesPage />}
+      {currentPage === 'clusters'    && <ClustersPage />}
       {currentPage === 'planning'    && <PlanningPage />}
       {currentPage === 'preview'     && <MigrationPreviewPage />}
       {currentPage === 'simulation'  && <SimulationPage />}
