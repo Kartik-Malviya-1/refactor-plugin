@@ -24,6 +24,11 @@ export function usePluginMessages(): void {
         case 'SCAN_COMPLETE':
           setScanResult(msg.payload)
           navigate('typography/overview')
+          // The scan just ran, so _styleCache is now warm with library styles.
+          // Clear the planning store so the style picker re-fetches fresh data
+          // the next time AssignmentPanel opens, instead of showing the stale
+          // empty result from the pre-scan load.
+          usePlanningDataStore.getState().clear()
           break
 
         case 'SCAN_ERROR':
