@@ -1,4 +1,4 @@
-// Typography-specific properties. Fully JSON-serializable.
+import type { TypographySource } from '../../shared/typography-source'
 
 export interface NormalizedLineHeight {
   unit: 'AUTO' | 'PIXELS' | 'PERCENT'
@@ -11,12 +11,7 @@ export interface NormalizedLetterSpacing {
 }
 
 export type NormalizedTextCase =
-  | 'ORIGINAL'
-  | 'UPPER'
-  | 'LOWER'
-  | 'TITLE'
-  | 'SMALL_CAPS'
-  | 'SMALL_CAPS_FORCED'
+  | 'ORIGINAL' | 'UPPER' | 'LOWER' | 'TITLE' | 'SMALL_CAPS' | 'SMALL_CAPS_FORCED'
 
 export type NormalizedTextDecoration = 'NONE' | 'UNDERLINE' | 'STRIKETHROUGH'
 
@@ -31,13 +26,15 @@ export interface TypographyProperties {
   textDecoration: NormalizedTextDecoration
 
   /**
-   * Sprint 2: Figma text style ID attached to this node.
-   * Empty string = no style (Raw Values).
-   * Non-empty = has a style; plugin determines local vs library.
-   *
-   * Intentionally excluded from normalizeTypographyProps() so that
-   * two layers with the same visual properties but different styles
-   * remain in the same Typography Signature group.
+   * Sprint 2: Figma text style ID.
+   * Empty string = no style. Non-empty = local or library style.
    */
   textStyleId?: string
+
+  /**
+   * v0.2.1: Full source classification resolved during scanning.
+   * Included in the normalization key so same-visual / different-source
+   * text produces separate Typography Signatures.
+   */
+  source: TypographySource
 }

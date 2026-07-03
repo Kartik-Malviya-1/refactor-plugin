@@ -1,33 +1,34 @@
 import type { AuditItem } from '../../shared/types'
 import type { TypographyProperties, NormalizedLineHeight, NormalizedLetterSpacing } from './types'
+import { sourceKey } from '../../shared/typography-source'
 
 function roundTo(n: number, decimals: number): number {
-  const factor = 10 ** decimals
-  return Math.round(n * factor) / factor
+  return Math.round(n * 10 ** decimals) / 10 ** decimals
 }
-
 function lhKey(lh: NormalizedLineHeight): string {
-  if (lh.unit === 'AUTO') return 'auto'
-  return `${lh.unit}:${roundTo(lh.value, 2)}`
+  return lh.unit === 'AUTO' ? 'auto' : `${lh.unit}:${roundTo(lh.value, 2)}`
 }
-
 function lsKey(ls: NormalizedLetterSpacing): string {
   return `${ls.unit}:${roundTo(ls.value, 2)}`
 }
 
 /**
- * Canonical normalization taking TProperties directly.
- * Used by TypographyScannerAdapter and the engine's grouper.
- * Template literal avoids allocating a throwaway Array per call.
+ * Normalization key for Typography Signature grouping.
+ *
+ * v0.2.1: Source identity appended to key so that visually-identical
+ * text with different sources (Raw vs LocalStyle vs LibraryStyle) produces
+ * SEPARATE Typography Signatures. This is the fix for library style detection.
+ *
+ * Example:
+ *   Raw Inter 16px:           "Inter|Regular|16|...|Raw:"
+ *   Local "Body" Inter 16px:  "Inter|Regular|16|...|LocalStyle:S:abc"
+ *   Library "Body" Inter 16px: "Inter|Regular|16|...|LibraryStyle:S:def"
  */
 export function normalizeTypographyProps(p: TypographyProperties): string {
-  return `${p.fontFamily}|${p.fontStyle}|${roundTo(p.fontSize, 2)}|${lhKey(p.lineHeight)}|${lsKey(p.letterSpacing)}|${p.textCase}|${p.textDecoration}`
+  const src = p.source ? sourceKey(p.source) : 'Raw:'
+  return `${p.fontFamily}|${p.fontStyle}|${roundTo(p.fontSize, 2)}|${lhKey(p.lineHeight)}|${lsKey(p.letterSpacing)}|${p.textCase}|${p.textDecoration}|${src}`
 }
 
-/**
- * AuditModule.normalize() compatibility wrapper.
- * The AuditModule interface passes AuditItem; we only need item.properties.
- */
 export function normalizeTypography(item: AuditItem<TypographyProperties>): string {
   return normalizeTypographyProps(item.properties)
 }
@@ -50,30 +51,16 @@ export function formatLineHeight(lh: NormalizedLineHeight): string {
   if (lh.unit === 'PERCENT') return `${lh.value}%`
   return `${lh.value}px`
 }
-
 export function formatLetterSpacing(ls: NormalizedLetterSpacing): string {
   if (ls.value === 0) return '0'
   if (ls.unit === 'PERCENT') return `${ls.value}%`
   return `${ls.value}px`
 }
-
 export function formatTextCase(tc: string): string {
-  const map: Record<string, string> = {
-    ORIGINAL: 'None',
-    UPPER: 'Uppercase',
-    LOWER: 'Lowercase',
-    TITLE: 'Title Case',
-    SMALL_CAPS: 'Small Caps',
-    SMALL_CAPS_FORCED: 'All Small Caps',
-  }
+  const map: Record<string, string> = { ORIGINAL: 'None', UPPER: 'Uppercase', LOWER: 'Lowercase', TITLE: 'Title Case', SMALL_CAPS: 'Small Caps', SMALL_CAPS_FORCED: 'All Small Caps' }
   return map[tc] ?? tc
 }
-
 export function formatTextDecoration(td: string): string {
-  const map: Record<string, string> = {
-    NONE: 'None',
-    UNDERLINE: 'Underline',
-    STRIKETHROUGH: 'Strikethrough',
-  }
+  const map: Record<string, string> = { NONE: 'None', UNDERLINE: 'Underline', STRIKETHROUGH: 'Strikethrough' }
   return map[td] ?? td
 }

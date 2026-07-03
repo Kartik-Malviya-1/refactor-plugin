@@ -4,11 +4,11 @@ import { _traversalInstrument } from '../engine/traversal'
 import { _grouperInstrument } from '../engine/grouper'
 import { typographyModule } from '../modules/typography/index'
 import { typographyScannerAdapter } from '../modules/typography/adapter'
-import { _extractionInstrument, resetExtractionInstrument } from '../modules/typography/scanner'
+import { _extractionInstrument, resetExtractionInstrument, clearStyleCache } from '../modules/typography/scanner'
 import { navigateToLocations } from './navigation'
 import { runAllBenchmarks } from '../benchmarks/runner'
 import type { UIToPluginMessage, PluginToUIMessage } from '../shared/messages'
-import type { AuditResult, SourceType } from '../shared/types'
+import type { AuditResult } from '../shared/types'
 import type { TypographyProperties } from '../modules/typography/types'
 import type { AvailableTextStyle, AvailableTypographyVariable } from '../shared/migration'
 
@@ -22,7 +22,28 @@ let scanCancelled = false
 function send(msg: PluginToUIMessage): void { figma.ui.postMessage(msg) }
 
 // ---------------------------------------------------------------------------
-// Formatting helpers
+// Source classification — v0.2.1
+//
+// The scanner now resolves source during extraction and stores it on
+// group.descriptor.source. Classification is simply a mapping from
+// TypographySource.type to the legacy SourceType string.
+// figma.getLocalTextStyles() is no longer needed for this step.
+// ---------------------------------------------------------------------------
+
+function classifyGroupSources(groups: AuditResult['groups']): void {
+  for (const group of groups) {
+    const props = group.descriptor as TypographyProperties
+    const srcType = props.source?.type ?? 'Raw'
+    group.source =
+      srcType === 'LocalStyle'   ? 'Local Text Style'
+      : srcType === 'LibraryStyle' ? 'Library Text Style'
+      : srcType === 'Variable'     ? 'Variable'
+      : 'Raw Values'
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Formatting helpers (profiler)
 // ---------------------------------------------------------------------------
 
 function fmtMs(ms: number): string {
@@ -43,117 +64,31 @@ function pct(ms: number, totalMs: number): string {
   return `${((ms / totalMs) * 100).toFixed(1).padStart(5)}%`
 }
 
-// ---------------------------------------------------------------------------
-// Source classification
-// ---------------------------------------------------------------------------
-
-function classifyGroupSources(
-  groups: AuditResult['groups'],
-  localStyleIds: Set<string>
-): void {
-  for (const group of groups) {
-    const props = group.descriptor as TypographyProperties
-    const styleId = props.textStyleId ?? ''
-    let source: SourceType
-    if (!styleId)                      source = 'Raw Values'
-    else if (localStyleIds.has(styleId)) source = 'Local Text Style'
-    else                               source = 'Library Text Style'
-    group.source = source
+function printDetailedReport(totalMs: number, serialMs: number, msgMs: number, scope: string, groupCount: number): void {
+  const ti = _traversalInstrument, ei = _extractionInstrument, gi = _grouperInstrument, t = scanEngine.timings
+  const N = ti.itemsExtracted, V = ti.nodesVisited
+  const propTotalMs = ei.fontNameMs + ei.fontSizeMs + ei.lineHeightMs + ei.letterSpacingMs + ei.textCaseMs + ei.textDecorationMs + ei.textStyleIdMs
+  const totalIpcAccesses = ei.fontNameAccesses + ei.fontSizeAccesses + ei.lineHeightAccesses + ei.letterSpacingAccesses + ei.textCaseAccesses + ei.textDecorationAccesses + ei.textStyleIdAccesses
+  const W = 76, line = '═'.repeat(W), mid = '─'.repeat(W)
+  function row(num: string, label: string, ms: number, items: number, il = ''): void {
+    console.log(`  ${(num+'  '+label).padEnd(30)}${fmtMs(ms).padStart(9)}   ${pct(ms,totalMs)}  ${items>0?fmtN(items).padStart(9):'        —'}  ${items>0?fmtRate(items,ms).padStart(12):'           —'}  ${il}`)
   }
-}
-
-// ---------------------------------------------------------------------------
-// Detailed instrumentation report
-// ---------------------------------------------------------------------------
-
-interface ProfileStage { name: string; ms: number }
-
-function printDetailedReport(
-  totalMs: number, serialMs: number, msgMs: number,
-  scope: string, groupCount: number
-): void {
-  const ti = _traversalInstrument
-  const ei = _extractionInstrument
-  const gi = _grouperInstrument
-  const t  = scanEngine.timings
-  const N = ti.itemsExtracted
-  const V = ti.nodesVisited
-
-  const propTotalMs = ei.fontNameMs + ei.fontSizeMs + ei.lineHeightMs +
-                      ei.letterSpacingMs + ei.textCaseMs + ei.textDecorationMs + ei.textStyleIdMs
-  const totalIpcAccesses = ei.fontNameAccesses + ei.fontSizeAccesses +
-                           ei.lineHeightAccesses + ei.letterSpacingAccesses +
-                           ei.textCaseAccesses + ei.textDecorationAccesses + ei.textStyleIdAccesses
-  const totalRangeCalls = ei.getRangeFontNameCalls + ei.getRangeFontSizeCalls +
-                          ei.getRangeLineHeightCalls + ei.getRangeLetterSpacingCalls +
-                          ei.getRangeTextCaseCalls + ei.getRangeTextDecorationCalls
-
-  const W = 76
-  const line = '═'.repeat(W)
-  const mid  = '─'.repeat(W)
-
-  function row(num: string, label: string, ms: number, items: number, itemLabel = ''): void {
-    const d = fmtMs(ms).padStart(9)
-    const p = pct(ms, totalMs)
-    const n = items > 0 ? fmtN(items).padStart(9) : '        —'
-    const r = items > 0 ? fmtRate(items, ms).padStart(12) : '           —'
-    console.log(`  ${(num + '  ' + label).padEnd(30)}${d}   ${p}  ${n}  ${r}  ${itemLabel}`)
-  }
-
   console.log('')
   console.log(`  ╔${line}╗`)
-  console.log(`  ║  Refactor — Detailed Scan Instrumentation Report${' '.repeat(W - 50)}║`)
+  console.log(`  ║  Refactor — Scan Profile (${scope})${' '.repeat(Math.max(0,W-26-scope.length))}║`)
   console.log(`  ╠${line}╣`)
-  console.log(`  ║  Scope: ${scope.padEnd(14)}  Nodes scanned: ${fmtN(ti.nodesMatched).padEnd(10)}  Total: ${fmtMs(totalMs)}${' '.repeat(Math.max(0, W - 56 - fmtMs(totalMs).length))}║`)
-  console.log(`  ╠${line}╣`)
-  console.log(`  ║  ${'#   Stage'.padEnd(30)}${'Duration'.padStart(9)}   ${'% Total'.padStart(7)}  ${'Items'.padStart(9)}  ${'Throughput'.padStart(12)}  ║`)
+  row('1','Document traversal',ti.traversalMs,V,'nodes')
+  row('2','Page lookup',ti.pageLookupMs,ti.pageLookupCount,'lookups')
+  row('3','Parent access',ti.parentAccessMs,ti.parentAccessCount,'accesses')
+  row('4','Text extraction',ti.extractionCallMs,N,'nodes')
+  console.log(`  ║  ${'    └ IPC prop reads'.padEnd(30)}${fmtMs(propTotalMs).padStart(9)}   ${pct(propTotalMs,totalMs)}  ${fmtN(totalIpcAccesses).padStart(9)}  ${fmtRate(totalIpcAccesses,propTotalMs).padStart(12)}  calls║`)
+  row('5','Normalization',gi.normalizationMs,gi.normalizationCount,'items')
+  row('6','Grouping total',t.groupingMs,N,'items')
+  row('7','Sorting',t.sortingMs,groupCount,'groups')
+  row('8','Serialization',serialMs,N,'items')
+  row('9','UI messaging',msgMs,0,'')
   console.log(`  ╠${mid}╣`)
-  row('1', 'Document traversal',    ti.traversalMs,     V, 'nodes visited')
-  row('2', 'Page lookup',           ti.pageLookupMs,    ti.pageLookupCount, 'lookups')
-  row('3', 'Parent access',         ti.parentAccessMs,  ti.parentAccessCount, 'accesses')
-  row('4', 'Text extraction total', ti.extractionCallMs,N, 'nodes')
-  console.log(`  ║  ${''.padEnd(30)}${'─'.repeat(44)}║`)
-  console.log(`  ║  ${'    ├ fontName'.padEnd(30)}${fmtMs(ei.fontNameMs).padStart(9)}   ${pct(ei.fontNameMs,totalMs)}  ${fmtN(ei.fontNameAccesses).padStart(9)}  ${fmtRate(ei.fontNameAccesses,ei.fontNameMs).padStart(12)}  IPC/node║`)
-  console.log(`  ║  ${'    ├ fontSize'.padEnd(30)}${fmtMs(ei.fontSizeMs).padStart(9)}   ${pct(ei.fontSizeMs,totalMs)}  ${fmtN(ei.fontSizeAccesses).padStart(9)}  ${fmtRate(ei.fontSizeAccesses,ei.fontSizeMs).padStart(12)}  IPC/node║`)
-  console.log(`  ║  ${'    ├ lineHeight'.padEnd(30)}${fmtMs(ei.lineHeightMs).padStart(9)}   ${pct(ei.lineHeightMs,totalMs)}  ${fmtN(ei.lineHeightAccesses).padStart(9)}  ${fmtRate(ei.lineHeightAccesses,ei.lineHeightMs).padStart(12)}  IPC/node║`)
-  console.log(`  ║  ${'    ├ letterSpacing'.padEnd(30)}${fmtMs(ei.letterSpacingMs).padStart(9)}   ${pct(ei.letterSpacingMs,totalMs)}  ${fmtN(ei.letterSpacingAccesses).padStart(9)}  ${fmtRate(ei.letterSpacingAccesses,ei.letterSpacingMs).padStart(12)}  IPC/node║`)
-  console.log(`  ║  ${'    ├ textCase'.padEnd(30)}${fmtMs(ei.textCaseMs).padStart(9)}   ${pct(ei.textCaseMs,totalMs)}  ${fmtN(ei.textCaseAccesses).padStart(9)}  ${fmtRate(ei.textCaseAccesses,ei.textCaseMs).padStart(12)}  IPC/node║`)
-  console.log(`  ║  ${'    ├ textDecoration'.padEnd(30)}${fmtMs(ei.textDecorationMs).padStart(9)}   ${pct(ei.textDecorationMs,totalMs)}  ${fmtN(ei.textDecorationAccesses).padStart(9)}  ${fmtRate(ei.textDecorationAccesses,ei.textDecorationMs).padStart(12)}  IPC/node║`)
-  console.log(`  ║  ${'    └ textStyleId [S2]'.padEnd(30)}${fmtMs(ei.textStyleIdMs).padStart(9)}   ${pct(ei.textStyleIdMs,totalMs)}  ${fmtN(ei.textStyleIdAccesses).padStart(9)}  ${fmtRate(ei.textStyleIdAccesses,ei.textStyleIdMs).padStart(12)}  IPC/node║`)
-  console.log(`  ║  ${'    Total IPC prop reads'.padEnd(30)}${fmtMs(propTotalMs).padStart(9)}   ${pct(propTotalMs,totalMs)}  ${fmtN(totalIpcAccesses).padStart(9)}  ${fmtRate(totalIpcAccesses,propTotalMs).padStart(12)}  calls   ║`)
-  console.log(`  ╠${mid}╣`)
-  row('5','Typography normalization', gi.normalizationMs, gi.normalizationCount,'items')
-  row('6','Bucket insertion',         gi.bucketInsertMs,  gi.normalizationCount,'items')
-  row('7','Grouping total',           t.groupingMs,       N,'items')
-  row('8','Sorting',                  t.sortingMs,        groupCount,'groups')
-  row('9','Serialization',            serialMs,           N,'items')
-  row('10','UI messaging',            msgMs,              0,'')
-  console.log(`  ╠${mid}╣`)
-  console.log(`  ║  ${'11  Total'.padEnd(30)}${fmtMs(totalMs).padStart(9)}   100.0%                            ║`)
-  console.log(`  ╠${line}╣`)
-
-  function counter(label: string, value: number, note = ''): void {
-    console.log(`  ║  ${label.padEnd(36)}${fmtN(value).padStart(12)}${note ? `   ${note}` : ''}${' '.repeat(Math.max(0, W - 36 - 12 - (note ? note.length + 3 : 0) - 2))}║`)
-  }
-  console.log(`  ║  Counters${' '.repeat(W - 9)}║`)
-  console.log(`  ╠${mid}╣`)
-  counter('Nodes visited (DFS total):', V)
-  counter('Text nodes found:', ti.nodesMatched)
-  counter('Items extracted (non-null):', ti.itemsExtracted)
-  counter('Page lookups (Map.get):', ti.pageLookupCount)
-  counter('Parent traversals (node.parent):', ti.parentAccessCount)
-  counter('fontName IPC accesses:', ei.fontNameAccesses)
-  counter('fontSize IPC accesses:', ei.fontSizeAccesses)
-  counter('textStyleId IPC accesses [S2]:', ei.textStyleIdAccesses)
-  counter('getRangeFontName() calls:', ei.getRangeFontNameCalls, totalRangeCalls === 0 ? '(0 mixed nodes)' : '')
-  counter('sharedPluginData accesses:', ei.sharedPluginDataAccesses, '(not implemented)')
-  counter('Variable lookups:', ei.variableLookups, '(Sprint 3)')
-  counter('Progress updates sent:', ti.progressUpdateCount)
-  console.log(`  ╠${mid}╣`)
-  const avgTotalMs   = N > 0 ? (totalMs / N).toFixed(3) : '0'
-  const avgExtractMs = N > 0 ? (ti.extractionCallMs / N).toFixed(3) : '0'
-  const avgIpcMs     = totalIpcAccesses > 0 ? (propTotalMs / totalIpcAccesses).toFixed(3) : '0'
-  console.log(`  ║  Avg per node: ${avgTotalMs}ms total  │  ${avgExtractMs}ms extraction  │  ${avgIpcMs}ms/IPC${' '.repeat(Math.max(0, W - 58 - avgTotalMs.length - avgExtractMs.length - avgIpcMs.length))}║`)
+  console.log(`  ║  ${'10  Total'.padEnd(30)}${fmtMs(totalMs).padStart(9)}   100.0%${' '.repeat(W-43)}║`)
   console.log(`  ╚${line}╝`)
   console.log('')
 }
@@ -173,12 +108,23 @@ figma.ui.onmessage = async (rawMsg: unknown) => {
   switch (msg.type) {
     case 'GET_SELECTION_INFO': {
       const count = figma.currentPage.selection.length
-      send({ type: 'SELECTION_INFO', payload: { count, hasSelection: count > 0 } })
+      send({ type: 'SELECTION_INFO', payload: { count, hasSelection: count > 0, currentPageId: figma.currentPage.id } })
       break
     }
 
     case 'SELECT_NODES': {
       const { locations } = msg.payload
+      if (locations.length === 0) break
+
+      // v0.2.1: If locations span multiple pages, tell the UI to show the
+      // Usage Explorer instead of attempting cross-page native selection.
+      const pageIds = new Set(locations.map(l => l.pageId))
+      if (pageIds.size > 1) {
+        send({ type: 'SHOW_USAGE_EXPLORER' })
+        break
+      }
+
+      // All locations on one page — use existing navigation.
       const outcome = await navigateToLocations(locations)
       if (outcome.ok) {
         const { selected, pageChanged, pageName, notFound } = outcome.result
@@ -189,46 +135,23 @@ figma.ui.onmessage = async (rawMsg: unknown) => {
       break
     }
 
-    // Sprint 4: fetch available styles and variables for planning targets.
-    // Does NOT modify the document.
     case 'GET_PLANNING_DATA': {
-      // Local text styles
       const textStyles: AvailableTextStyle[] = figma.getLocalTextStyles().map((s) => {
         const fontName = s.fontName as FontName
-        return {
-          id: s.id,
-          name: s.name,
-          fontFamily: fontName.family,
-          fontStyle: fontName.style,
-          fontSize: s.fontSize as number,
-          isLocal: true,
-        }
+        return { id: s.id, name: s.name, fontFamily: fontName.family, fontStyle: fontName.style, fontSize: s.fontSize as number, isLocal: true }
       })
-
-      // Local variables (typography-relevant: STRING and FLOAT)
       const variables: AvailableTypographyVariable[] = []
       try {
         const collections = figma.variables.getLocalVariableCollections()
         for (const collection of collections) {
           for (const varId of collection.variableIds) {
             const variable = figma.variables.getVariableById(varId)
-            if (
-              variable &&
-              (variable.resolvedType === 'STRING' || variable.resolvedType === 'FLOAT')
-            ) {
-              variables.push({
-                id: variable.id,
-                name: variable.name,
-                collectionName: collection.name,
-                resolvedType: variable.resolvedType,
-              })
+            if (variable && (variable.resolvedType === 'STRING' || variable.resolvedType === 'FLOAT')) {
+              variables.push({ id: variable.id, name: variable.name, collectionName: collection.name, resolvedType: variable.resolvedType })
             }
           }
         }
-      } catch {
-        // figma.variables not available in older Figma API versions
-      }
-
+      } catch { /* variables API not available */ }
       send({ type: 'PLANNING_DATA', payload: { textStyles, variables } })
       break
     }
@@ -236,18 +159,13 @@ figma.ui.onmessage = async (rawMsg: unknown) => {
     case 'START_SCAN': {
       const { moduleId, scope } = msg.payload
       const adapter = getAdapter(moduleId)
-      if (!adapter) {
-        send({ type: 'SCAN_ERROR', payload: { error: `No adapter registered for module "${moduleId}".` } })
-        return
-      }
+      if (!adapter) { send({ type: 'SCAN_ERROR', payload: { error: `No adapter for "${moduleId}".` } }); return }
 
       scanCancelled = false
       const tTotal = Date.now()
 
-      let localStyleIds: Set<string>
-      try { localStyleIds = new Set(figma.getLocalTextStyles().map((s) => s.id)) }
-      catch { localStyleIds = new Set() }
-
+      // Clear style cache at start of each scan so renamed/deleted styles are fresh.
+      clearStyleCache()
       resetExtractionInstrument()
       send({ type: 'SCAN_STARTED', payload: { moduleId, scope } })
 
@@ -256,30 +174,22 @@ figma.ui.onmessage = async (rawMsg: unknown) => {
           adapter, scope, () => scanCancelled,
           (progress) => { if (scanCancelled) return; send({ type: 'SCAN_PROGRESS', payload: progress }) }
         )
-
         if (scanCancelled) { send({ type: 'SCAN_CANCELLED' }); return }
 
-        classifyGroupSources(groups, localStyleIds)
+        // v0.2.1: classification now reads group.descriptor.source (set by scanner)
+        classifyGroupSources(groups)
 
-        const scopeLabel = scope === 'selection' ? 'Selection'
-          : scope === 'page' ? figma.currentPage.name : 'Entire File'
-
+        const scopeLabel = scope === 'selection' ? 'Selection' : scope === 'page' ? figma.currentPage.name : 'Entire File'
         const tSerial = Date.now()
-        const result: AuditResult = {
-          moduleId, scope, scopeLabel, totalItems: items.length,
-          groups, scannedAt: tTotal, durationMs: Date.now() - tTotal,
-        }
+        const result: AuditResult = { moduleId, scope, scopeLabel, totalItems: items.length, groups, scannedAt: tTotal, durationMs: Date.now() - tTotal }
         const serialMs = Date.now() - tSerial
-
         const tMsg = Date.now()
         send({ type: 'SCAN_COMPLETE', payload: result })
         const msgMs = Date.now() - tMsg
-
         const totalMs = Date.now() - tTotal
         printDetailedReport(totalMs, serialMs, msgMs, scopeLabel, groups.length)
       } catch (err) {
-        const message = err instanceof Error ? err.message : String(err)
-        send({ type: 'SCAN_ERROR', payload: { error: message } })
+        send({ type: 'SCAN_ERROR', payload: { error: err instanceof Error ? err.message : String(err) } })
       }
       break
     }
