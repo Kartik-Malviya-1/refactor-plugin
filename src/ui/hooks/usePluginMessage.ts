@@ -4,6 +4,10 @@ import { useAuditStore } from '../store/audit'
 import { useUIStore } from '../store/ui'
 import { usePlanningDataStore } from '../store/planningData'
 
+// Shared listener registry — TypographyInspector subscribes here to be
+// notified when the plugin sends SHOW_USAGE_EXPLORER (multi-page selection).
+export const _usageExplorerListeners: Array<() => void> = []
+
 export function usePluginMessages(): void {
   const { setScanProgress, setScanResult, setScanError } = useAuditStore()
   const { setSelectionCount, setCurrentPageId, showToast, navigate } = useUIStore()
@@ -38,7 +42,7 @@ export function usePluginMessages(): void {
           const { count, pageChanged, pageName, notFound } = msg.payload
           const layerWord = count !== 1 ? 'layers' : 'layer'
           let message = `${count} ${layerWord} selected`
-          if (pageChanged) message = `Navigated to “${pageName}” — ${message}`
+          if (pageChanged) message = `Navigated to "${pageName}" — ${message}`
           if (notFound > 0) message += ` (${notFound} no longer exist)`
           showToast(message, 'success')
           break
@@ -47,16 +51,12 @@ export function usePluginMessages(): void {
         case 'NAVIGATION_ERROR': showToast(msg.payload.error, 'error'); break
 
         case 'PLANNING_DATA':
-          // setData() also sets loading = false and loaded = true
           setPlanningData(msg.payload.textStyles, msg.payload.variables)
           break
 
-        case 'SHOW_USAGE_EXPLORER': {
-          // Notify any mounted TypographyInspector
-          const { _usageExplorerListeners } = require('./usePluginMessage.listeners')
+        case 'SHOW_USAGE_EXPLORER':
           for (const cb of _usageExplorerListeners) cb()
           break
-        }
       }
     }
 
