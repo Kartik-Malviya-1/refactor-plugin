@@ -4,7 +4,7 @@ import { _traversalInstrument } from '../engine/traversal'
 import { _grouperInstrument } from '../engine/grouper'
 import { typographyModule } from '../modules/typography/index'
 import { typographyScannerAdapter } from '../modules/typography/adapter'
-import { _extractionInstrument, resetExtractionInstrument, clearStyleCache } from '../modules/typography/scanner'
+import { _extractionInstrument, resetExtractionInstrument, clearStyleCache, getDiscoveredStyles } from '../modules/typography/scanner'
 import { navigateToLocations } from './navigation'
 import { runAllBenchmarks } from '../benchmarks/runner'
 import type { UIToPluginMessage, PluginToUIMessage } from '../shared/messages'
@@ -18,16 +18,10 @@ registerAdapter(typographyScannerAdapter)
 figma.showUI(__html__, { width: 860, height: 620, themeColors: true })
 
 let scanCancelled = false
-
 function send(msg: PluginToUIMessage): void { figma.ui.postMessage(msg) }
 
 // ---------------------------------------------------------------------------
-// Source classification — v0.2.1
-//
-// The scanner now resolves source during extraction and stores it on
-// group.descriptor.source. Classification is simply a mapping from
-// TypographySource.type to the legacy SourceType string.
-// figma.getLocalTextStyles() is no longer needed for this step.
+// Source classification
 // ---------------------------------------------------------------------------
 
 function classifyGroupSources(groups: AuditResult['groups']): void {
@@ -43,52 +37,48 @@ function classifyGroupSources(groups: AuditResult['groups']): void {
 }
 
 // ---------------------------------------------------------------------------
-// Formatting helpers (profiler)
+// Profiler (abbreviated)
 // ---------------------------------------------------------------------------
 
 function fmtMs(ms: number): string {
-  if (ms >= 10000) return `${(ms / 1000).toFixed(1)}s `
-  if (ms >= 1000)  return `${(ms / 1000).toFixed(2)}s`
+  if (ms >= 10000) return `${(ms/1000).toFixed(1)}s `
+  if (ms >= 1000)  return `${(ms/1000).toFixed(2)}s`
   return `${ms}ms`
 }
 function fmtN(n: number): string { return n.toLocaleString() }
 function fmtRate(items: number, ms: number): string {
   if (ms <= 0) return '        —'
-  const r = Math.round((items / ms) * 1000)
-  if (r >= 1_000_000) return `${(r / 1_000_000).toFixed(1)}M/s`
-  if (r >= 1_000)     return `${Math.round(r / 1_000)}K/s`
+  const r = Math.round((items/ms)*1000)
+  if (r >= 1_000_000) return `${(r/1_000_000).toFixed(1)}M/s`
+  if (r >= 1_000)     return `${Math.round(r/1_000)}K/s`
   return `${r}/s`
 }
 function pct(ms: number, totalMs: number): string {
   if (totalMs <= 0) return '   0.0%'
-  return `${((ms / totalMs) * 100).toFixed(1).padStart(5)}%`
+  return `${((ms/totalMs)*100).toFixed(1).padStart(5)}%`
 }
 
 function printDetailedReport(totalMs: number, serialMs: number, msgMs: number, scope: string, groupCount: number): void {
   const ti = _traversalInstrument, ei = _extractionInstrument, gi = _grouperInstrument, t = scanEngine.timings
   const N = ti.itemsExtracted, V = ti.nodesVisited
-  const propTotalMs = ei.fontNameMs + ei.fontSizeMs + ei.lineHeightMs + ei.letterSpacingMs + ei.textCaseMs + ei.textDecorationMs + ei.textStyleIdMs
-  const totalIpcAccesses = ei.fontNameAccesses + ei.fontSizeAccesses + ei.lineHeightAccesses + ei.letterSpacingAccesses + ei.textCaseAccesses + ei.textDecorationAccesses + ei.textStyleIdAccesses
-  const W = 76, line = '═'.repeat(W), mid = '─'.repeat(W)
+  const propMs = ei.fontNameMs+ei.fontSizeMs+ei.lineHeightMs+ei.letterSpacingMs+ei.textCaseMs+ei.textDecorationMs+ei.textStyleIdMs
+  const propN  = ei.fontNameAccesses+ei.fontSizeAccesses+ei.lineHeightAccesses+ei.letterSpacingAccesses+ei.textCaseAccesses+ei.textDecorationAccesses+ei.textStyleIdAccesses
+  const W = 72, line = '═'.repeat(W), mid = '─'.repeat(W)
   function row(num: string, label: string, ms: number, items: number, il = ''): void {
-    console.log(`  ${(num+'  '+label).padEnd(30)}${fmtMs(ms).padStart(9)}   ${pct(ms,totalMs)}  ${items>0?fmtN(items).padStart(9):'        —'}  ${items>0?fmtRate(items,ms).padStart(12):'           —'}  ${il}`)
+    console.log(`  ${(num+'  '+label).padEnd(28)}${fmtMs(ms).padStart(9)}   ${pct(ms,totalMs)}  ${items>0?fmtN(items).padStart(9):'        —'}  ${items>0?fmtRate(items,ms).padStart(12):'           —'}  ${il}`)
   }
   console.log('')
   console.log(`  ╔${line}╗`)
-  console.log(`  ║  Refactor — Scan Profile (${scope})${' '.repeat(Math.max(0,W-26-scope.length))}║`)
+  console.log(`  ║  Scan Profile (${scope})${' '.repeat(Math.max(0,W-14-scope.length))}║`)
   console.log(`  ╠${line}╣`)
-  row('1','Document traversal',ti.traversalMs,V,'nodes')
-  row('2','Page lookup',ti.pageLookupMs,ti.pageLookupCount,'lookups')
-  row('3','Parent access',ti.parentAccessMs,ti.parentAccessCount,'accesses')
-  row('4','Text extraction',ti.extractionCallMs,N,'nodes')
-  console.log(`  ║  ${'    └ IPC prop reads'.padEnd(30)}${fmtMs(propTotalMs).padStart(9)}   ${pct(propTotalMs,totalMs)}  ${fmtN(totalIpcAccesses).padStart(9)}  ${fmtRate(totalIpcAccesses,propTotalMs).padStart(12)}  calls║`)
-  row('5','Normalization',gi.normalizationMs,gi.normalizationCount,'items')
-  row('6','Grouping total',t.groupingMs,N,'items')
-  row('7','Sorting',t.sortingMs,groupCount,'groups')
-  row('8','Serialization',serialMs,N,'items')
-  row('9','UI messaging',msgMs,0,'')
+  row('1','Traversal',    ti.traversalMs,      V,'nodes')
+  row('4','Extraction',   ti.extractionCallMs, N,'nodes')
+  console.log(`  ║  ${'    IPC total'.padEnd(28)}${fmtMs(propMs).padStart(9)}   ${pct(propMs,totalMs)}  ${fmtN(propN).padStart(9)}  ${fmtRate(propN,propMs).padStart(12)}  calls║`)
+  row('7','Grouping',     t.groupingMs,        N,'items')
+  row('8','Sorting',      t.sortingMs,         groupCount,'groups')
+  row('9','Serialization',serialMs,            N,'items')
   console.log(`  ╠${mid}╣`)
-  console.log(`  ║  ${'10  Total'.padEnd(30)}${fmtMs(totalMs).padStart(9)}   100.0%${' '.repeat(W-43)}║`)
+  console.log(`  ║  Total${' '.repeat(W-6)} ${fmtMs(totalMs).padStart(9)}║`)
   console.log(`  ╚${line}╝`)
   console.log('')
 }
@@ -115,16 +105,8 @@ figma.ui.onmessage = async (rawMsg: unknown) => {
     case 'SELECT_NODES': {
       const { locations } = msg.payload
       if (locations.length === 0) break
-
-      // v0.2.1: If locations span multiple pages, tell the UI to show the
-      // Usage Explorer instead of attempting cross-page native selection.
       const pageIds = new Set(locations.map(l => l.pageId))
-      if (pageIds.size > 1) {
-        send({ type: 'SHOW_USAGE_EXPLORER' })
-        break
-      }
-
-      // All locations on one page — use existing navigation.
+      if (pageIds.size > 1) { send({ type: 'SHOW_USAGE_EXPLORER' }); break }
       const outcome = await navigateToLocations(locations)
       if (outcome.ok) {
         const { selected, pageChanged, pageName, notFound } = outcome.result
@@ -136,10 +118,51 @@ figma.ui.onmessage = async (rawMsg: unknown) => {
     }
 
     case 'GET_PLANNING_DATA': {
-      const textStyles: AvailableTextStyle[] = figma.getLocalTextStyles().map((s) => {
-        const fontName = s.fontName as FontName
-        return { id: s.id, name: s.name, fontFamily: fontName.family, fontStyle: fontName.style, fontSize: s.fontSize as number, isLocal: true }
-      })
+      // ── Stage 1: Local styles ─────────────────────────────────────────
+      const localStylesList = figma.getLocalTextStyles()
+      const localStyleIds   = new Set(localStylesList.map(s => s.id))
+      const textStyles: AvailableTextStyle[] = []
+
+      for (const s of localStylesList) {
+        const fn = s.fontName as FontName
+        textStyles.push({
+          id: s.id, name: s.name,
+          fontFamily: fn.family, fontStyle: fn.style,
+          fontSize: s.fontSize as number,
+          isLocal: true,
+        })
+      }
+      console.log(`[Refactor] GET_PLANNING_DATA stage 1 — local styles: ${localStylesList.length}`)
+
+      // ── Stage 2: Library styles from scan cache ───────────────────────
+      // figma.getLocalTextStyles() does NOT return library (remote) styles.
+      // The scanner caches every style it encounters via figma.getStyleById().
+      // We read that cache here to include library styles in the picker.
+      const discoveredStyles = getDiscoveredStyles()
+      let libraryStyleCount = 0
+
+      for (const [styleId, cached] of discoveredStyles) {
+        if (!cached)               continue  // style resolution failed during scan
+        if (!cached.remote)        continue  // local — already added above
+        if (localStyleIds.has(styleId)) continue  // safety: skip if somehow in local list
+        if (!cached.fontFamily || !cached.fontStyle || cached.fontSize == null) continue  // incomplete
+
+        const segments = cached.name.split('/')
+        textStyles.push({
+          id:          styleId,
+          name:        cached.name,
+          fontFamily:  cached.fontFamily,
+          fontStyle:   cached.fontStyle,
+          fontSize:    cached.fontSize,
+          isLocal:     false,
+          libraryName: segments.length > 1 ? segments[0].trim() : undefined,
+        })
+        libraryStyleCount++
+      }
+      console.log(`[Refactor] GET_PLANNING_DATA stage 2 — library styles from cache: ${libraryStyleCount}`)
+      console.log(`[Refactor] GET_PLANNING_DATA stage 3 — total styles: ${textStyles.length}`)
+
+      // ── Stage 3: Variables ────────────────────────────────────────────
       const variables: AvailableTypographyVariable[] = []
       try {
         const collections = figma.variables.getLocalVariableCollections()
@@ -152,6 +175,8 @@ figma.ui.onmessage = async (rawMsg: unknown) => {
           }
         }
       } catch { /* variables API not available */ }
+      console.log(`[Refactor] GET_PLANNING_DATA stage 4 — variables: ${variables.length}`)
+
       send({ type: 'PLANNING_DATA', payload: { textStyles, variables } })
       break
     }
@@ -164,8 +189,7 @@ figma.ui.onmessage = async (rawMsg: unknown) => {
       scanCancelled = false
       const tTotal = Date.now()
 
-      // Clear style cache at start of each scan so renamed/deleted styles are fresh.
-      clearStyleCache()
+      clearStyleCache()          // clear cache so this scan is fresh
       resetExtractionInstrument()
       send({ type: 'SCAN_STARTED', payload: { moduleId, scope } })
 
@@ -176,17 +200,21 @@ figma.ui.onmessage = async (rawMsg: unknown) => {
         )
         if (scanCancelled) { send({ type: 'SCAN_CANCELLED' }); return }
 
-        // v0.2.1: classification now reads group.descriptor.source (set by scanner)
         classifyGroupSources(groups)
+
+        // Log style cache stats after scan for debugging
+        const cacheEntries     = [...getDiscoveredStyles().entries()]
+        const localInCache     = cacheEntries.filter(([, c]) => c && !c.remote).length
+        const libraryInCache   = cacheEntries.filter(([, c]) => c && c.remote).length
+        const unresolved       = cacheEntries.filter(([, c]) => c === null).length
+        console.log(`[Refactor] Scan complete — style cache: ${localInCache} local, ${libraryInCache} library, ${unresolved} unresolved`)
 
         const scopeLabel = scope === 'selection' ? 'Selection' : scope === 'page' ? figma.currentPage.name : 'Entire File'
         const tSerial = Date.now()
-        const result: AuditResult = { moduleId, scope, scopeLabel, totalItems: items.length, groups, scannedAt: tTotal, durationMs: Date.now() - tTotal }
-        const serialMs = Date.now() - tSerial
-        const tMsg = Date.now()
-        send({ type: 'SCAN_COMPLETE', payload: result })
-        const msgMs = Date.now() - tMsg
-        const totalMs = Date.now() - tTotal
+        const result: AuditResult = { moduleId, scope, scopeLabel, totalItems: items.length, groups, scannedAt: tTotal, durationMs: Date.now()-tTotal }
+        const serialMs = Date.now()-tSerial
+        const tMsg = Date.now(); send({ type: 'SCAN_COMPLETE', payload: result }); const msgMs = Date.now()-tMsg
+        const totalMs = Date.now()-tTotal
         printDetailedReport(totalMs, serialMs, msgMs, scopeLabel, groups.length)
       } catch (err) {
         send({ type: 'SCAN_ERROR', payload: { error: err instanceof Error ? err.message : String(err) } })
