@@ -99,10 +99,10 @@ export function RawValuesPage() {
   const { expression, addCondition, removeCondition, updateCondition, toggleCondition, clearAll } = useQueryStore()
   const { loaded: planningLoaded, loading: planningLoading } = usePlanningDataStore()
 
-  // Selection is keyed by AuditGroup.key — the canonical Typography Signature
-  // identifier. Stable across repeated scans of the same document.
-  // Never use group.id here (it is a derived shorthand, not the identity).
+  // All useState declarations must come before any useMemo that references them.
+  // Placing them after causes a TDZ ReferenceError during dependency-array evaluation.
   const [selected, setSelected] = useState<Set<string>>(new Set())
+  const [search, setSearch]     = useState('')
 
   useEffect(() => {
     if (!planningLoaded && !planningLoading) {
@@ -138,27 +138,22 @@ export function RawValuesPage() {
       g.descriptor.fontStyle.toLowerCase().includes(q) ||
       String(g.descriptor.fontSize).includes(q)
     )
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [workingSetGroups, search])
 
-  // selectedGroups derived from key-based selection, not id
+  // selectedGroups keyed by AuditGroup.key (canonical identifier)
   const selectedGroups = useMemo(() =>
     workingSetGroups.filter(g => selected.has(g.key)),
     [workingSetGroups, selected]
   )
-
-  const [search, setSearch] = useState('')
 
   function toggleRow(sigKey: string) {
     const next = new Set(selected)
     if (next.has(sigKey)) next.delete(sigKey); else next.add(sigKey)
     setSelected(next)
   }
-  function selectAll() {
-    setSelected(new Set(workingSetGroups.map(g => g.key)))
-  }
-  function clearSel() { setSelected(new Set()) }
-  function invertSel() {
+  function selectAll()  { setSelected(new Set(workingSetGroups.map(g => g.key))) }
+  function clearSel()   { setSelected(new Set()) }
+  function invertSel()  {
     const next = new Set<string>()
     for (const g of workingSetGroups) { if (!selected.has(g.key)) next.add(g.key) }
     setSelected(next)
@@ -256,21 +251,21 @@ export function RawValuesPage() {
         ) : (
           displayGroups.map(group => (
             <SignatureRow
-              key={group.key}                        // React render key
+              key={group.key}
               group={group}
-              isSelected={selected.has(group.key)}   // canonical identity
-              assignment={assignments[group.key]}     // canonical identity
-              onToggle={() => toggleRow(group.key)}   // canonical identity
-              onInspect={() => inspectGroup(group.key)} // canonical identity
+              isSelected={selected.has(group.key)}
+              assignment={assignments[group.key]}
+              onToggle={() => toggleRow(group.key)}
+              onInspect={() => inspectGroup(group.key)}
             />
           ))
         )}
       </div>
 
-      {/* Assignment Drawer — only appears when signatures are selected */}
+      {/* Assignment Drawer */}
       {selected.size > 0 && (
         <AssignmentDrawer
-          selectedIds={[...selected]}   // key values, not id values
+          selectedIds={[...selected]}
           selectedGroups={selectedGroups}
           dominant={dominant}
           onDeselect={clearSel}
