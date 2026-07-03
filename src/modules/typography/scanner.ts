@@ -6,15 +6,16 @@ import { intern } from '../../engine/traversal'
 // ---------------------------------------------------------------------------
 // Style cache
 //
-// Extended in v0.2.4 to also store font properties so that
-// GET_PLANNING_DATA can include library styles without additional
-// figma.getStyleById() calls per style.
+// Populated by preloadStyleCacheAsync() BEFORE scanning starts.
+// figma.getStyleByIdAsync() is the only available style resolution API in
+// plugins with documentAccess: "dynamic-page". The synchronous
+// figma.getStyleById() does not exist in this API version.
 // ---------------------------------------------------------------------------
 interface CachedStyle {
   name:    string
   remote:  boolean
   key:     string
-  // Text-style-specific (undefined for non-text styles)
+  // Captured at resolve time so GET_PLANNING_DATA needs no extra API calls
   fontFamily?: string
   fontStyle?:  string
   fontSize?:   number
@@ -22,48 +23,108 @@ interface CachedStyle {
 
 const _styleCache = new Map<string, CachedStyle | null>()
 
+// Cache-only lookup — guaranteed to be pre-populated by preloadStyleCacheAsync()
 function resolveStyle(styleId: string): CachedStyle | null {
   if (_styleCache.has(styleId)) return _styleCache.get(styleId)!
-  try {
-    const style = figma.getStyleById(styleId)
-    if (!style) { _styleCache.set(styleId, null); return null }
-
-    let fontFamily: string | undefined
-    let fontStyle:  string | undefined
-    let fontSize:   number | undefined
-
-    // Capture typography properties for text styles so planning data
-    // can reconstruct AvailableTextStyle without extra API calls.
-    if (style.type === 'TEXT') {
-      const ts = style as TextStyle
-      if (ts.fontName !== figma.mixed) {
-        const fn = ts.fontName as FontName
-        fontFamily = fn.family
-        fontStyle  = fn.style
-      }
-      if (ts.fontSize !== figma.mixed) {
-        fontSize = ts.fontSize as number
-      }
-    }
-
-    const result: CachedStyle = { name: style.name, remote: style.remote, key: style.key, fontFamily, fontStyle, fontSize }
-    _styleCache.set(styleId, result)
-    return result
-  } catch {
-    _styleCache.set(styleId, null)
-    return null
-  }
+  // Style was not in scope or wasn't linked to any text node
+  _styleCache.set(styleId, null)
+  return null
 }
 
 export function clearStyleCache(): void { _styleCache.clear() }
 
-/**
- * Returns the complete style cache populated during the last scan.
- * Used by GET_PLANNING_DATA to include library styles (remote: true)
- * that figma.getLocalTextStyles() does not return.
- */
 export function getDiscoveredStyles(): ReadonlyMap<string, CachedStyle | null> {
   return _styleCache
+}
+
+/**
+ * Pre-populate the style cache for the given scan scope.
+ *
+ * Must be called with `await` in START_SCAN BEFORE scanEngine.run().
+ * Traverses text nodes to collect unique textStyleIds, then resolves each
+ * one via figma.getStyleByIdAsync() (the only available async style API).
+ *
+ * For 'file' scope, pages are switched via setCurrentPageAsync so every
+ * page is covered; the original page is restored when done.
+ */
+export async function preloadStyleCacheAsync(scope: string): Promise<void> {
+  const styleIds = new Set<string>()
+
+  function collectFromNodes(nodes: ReadonlyArray<SceneNode>): void {
+    for (const node of nodes) {
+      if (node.type === 'TEXT') {
+        const id = (node as TextNode).textStyleId
+        // textStyleId is a string when uniform, figma.mixed Symbol when mixed
+        if (typeof id === 'string' && id.length > 0) styleIds.add(id)
+      }
+      if ('children' in node) {
+        collectFromNodes((node as ChildrenMixin).children)
+      }
+    }
+  }
+
+  if (scope === 'selection') {
+    collectFromNodes(figma.currentPage.selection)
+  } else if (scope === 'page') {
+    collectFromNodes(figma.currentPage.children)
+  } else {
+    // file scope — must switch pages in dynamic-page mode to access each page
+    const startPage = figma.currentPage
+    for (const child of figma.root.children) {
+      if (child.type === 'PAGE') {
+        await figma.setCurrentPageAsync(child as PageNode)
+        collectFromNodes((child as PageNode).children)
+      }
+    }
+    await figma.setCurrentPageAsync(startPage)
+  }
+
+  console.log(`[Refactor] preloadStyleCacheAsync: ${styleIds.size} unique textStyleIds (scope="${scope}")`)
+
+  let resolved = 0, unresolved = 0
+  for (const styleId of styleIds) {
+    if (_styleCache.has(styleId)) { resolved++; continue }
+    try {
+      const style = await figma.getStyleByIdAsync(styleId)
+      if (!style) {
+        _styleCache.set(styleId, null)
+        unresolved++
+        console.log(`[Refactor] preloadStyleCacheAsync: null for id=${styleId} (deleted/missing style)`)
+        continue
+      }
+
+      let fontFamily: string | undefined
+      let fontStyle:  string | undefined
+      let fontSize:   number | undefined
+
+      if (style.type === 'TEXT') {
+        const ts = style as unknown as TextStyle
+        // TextStyle.fontName is always FontName (not mixed) on a style object
+        const fn = ts.fontName as FontName
+        if (fn && typeof fn.family === 'string') {
+          fontFamily = fn.family
+          fontStyle  = fn.style
+        }
+        // TextStyle.fontSize is always number (not mixed) on a style object
+        if (typeof ts.fontSize === 'number') fontSize = ts.fontSize
+      }
+
+      _styleCache.set(styleId, {
+        name: style.name, remote: style.remote, key: style.key,
+        fontFamily, fontStyle, fontSize,
+      })
+      resolved++
+    } catch (err) {
+      _styleCache.set(styleId, null)
+      unresolved++
+      console.log(`[Refactor] preloadStyleCacheAsync: error id=${styleId}: ${String(err)}`)
+    }
+  }
+
+  const entries    = [..._styleCache.values()]
+  const libCount   = entries.filter(c => c && c.remote).length
+  const localCount = entries.filter(c => c && !c.remote).length
+  console.log(`[Refactor] preloadStyleCacheAsync complete: resolved=${resolved} unresolved=${unresolved} local=${localCount} library=${libCount}`)
 }
 
 // ---------------------------------------------------------------------------

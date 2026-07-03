@@ -4,7 +4,13 @@ import { _traversalInstrument } from '../engine/traversal'
 import { _grouperInstrument } from '../engine/grouper'
 import { typographyModule } from '../modules/typography/index'
 import { typographyScannerAdapter } from '../modules/typography/adapter'
-import { _extractionInstrument, resetExtractionInstrument, clearStyleCache, getDiscoveredStyles } from '../modules/typography/scanner'
+import {
+  _extractionInstrument,
+  resetExtractionInstrument,
+  clearStyleCache,
+  getDiscoveredStyles,
+  preloadStyleCacheAsync,
+} from '../modules/typography/scanner'
 import { navigateToLocations } from './navigation'
 import { runAllBenchmarks } from '../benchmarks/runner'
 import type { UIToPluginMessage, PluginToUIMessage } from '../shared/messages'
@@ -122,19 +128,17 @@ figma.ui.onmessage = async (rawMsg: unknown) => {
       const textStyles: AvailableTextStyle[] = []
       const variables: AvailableTypographyVariable[] = []
 
-      // ── Stage 1: local text styles ────────────────────────────────────────
+      // ── Stage 1: local text styles (async API — sync does not exist) ──────────
       let localStyleIds = new Set<string>()
       try {
-        const localStylesList = figma.getLocalTextStyles()
+        const localStylesList = await figma.getLocalTextStylesAsync()
         localStyleIds = new Set(localStylesList.map(s => s.id))
         for (const s of localStylesList) {
           const fn = s.fontName as FontName
           textStyles.push({ id: s.id, name: s.name, fontFamily: fn.family, fontStyle: fn.style, fontSize: s.fontSize as number, isLocal: true })
         }
         console.log(`[TRACE S1] local styles: ${localStylesList.length}`)
-        if (localStylesList.length > 0) {
-          console.log('[TRACE S1] sample:', JSON.stringify(textStyles.slice(0,3)))
-        }
+        if (localStylesList.length > 0) console.log('[TRACE S1] sample:', JSON.stringify(textStyles.slice(0,3)))
       } catch (err) {
         console.error('[TRACE S1] FAILED:', err)
       }
@@ -157,27 +161,21 @@ figma.ui.onmessage = async (rawMsg: unknown) => {
           }
           const segments = cached.name.split('/')
           const entry: AvailableTextStyle = {
-            id:          styleId,
-            name:        cached.name,
-            fontFamily:  cached.fontFamily,
-            fontStyle:   cached.fontStyle,
-            fontSize:    cached.fontSize,
-            isLocal:     false,
+            id: styleId, name: cached.name,
+            fontFamily: cached.fontFamily, fontStyle: cached.fontStyle, fontSize: cached.fontSize,
+            isLocal: false,
             libraryName: segments.length > 1 ? segments[0].trim() : undefined,
           }
           textStyles.push(entry)
           accepted++
-          if (accepted <= 5) {
-            console.log(`[TRACE S2] accepted[${accepted}]:`, JSON.stringify(entry))
-          }
+          if (accepted <= 5) console.log(`[TRACE S2] accepted[${accepted}]:`, JSON.stringify(entry))
         }
-
         console.log(`[TRACE S2] cache breakdown — total:${discoveredStyles.size} null:${skipNull} local:${skipLocal} dupe:${skipDupe} no-font:${skipNoFont} accepted:${accepted}`)
       } catch (err) {
         console.error('[TRACE S2] FAILED:', err)
       }
 
-      // ── Stage 3: variables ─────────────────────────────────────────────────
+      // ── Stage 3: variables ──────────────────────────────────────────────
       try {
         const collections = figma.variables.getLocalVariableCollections()
         for (const collection of collections) {
@@ -191,10 +189,9 @@ figma.ui.onmessage = async (rawMsg: unknown) => {
       } catch { /* variables API not available */ }
 
       console.log(`[TRACE S3] PLANNING_DATA payload — textStyles:${textStyles.length} variables:${variables.length}`)
-      if (textStyles.length > 0) {
-        console.log('[TRACE S3] first 5 textStyles:', JSON.stringify(textStyles.slice(0,5)))
-      }
+      if (textStyles.length > 0) console.log('[TRACE S3] first 5 textStyles:', JSON.stringify(textStyles.slice(0,5)))
 
+      // Always send — even if every stage above failed, the UI gets a response
       send({ type: 'PLANNING_DATA', payload: { textStyles, variables } })
       break
     }
@@ -210,6 +207,13 @@ figma.ui.onmessage = async (rawMsg: unknown) => {
       clearStyleCache()
       resetExtractionInstrument()
       send({ type: 'SCAN_STARTED', payload: { moduleId, scope } })
+
+      // Phase 1: resolve all textStyleIds async BEFORE the sync extraction pass.
+      // figma.getStyleByIdAsync() is the only available style API in
+      // dynamic-page plugins — the synchronous getStyleById() does not exist.
+      await preloadStyleCacheAsync(scope)
+
+      if (scanCancelled) { send({ type: 'SCAN_CANCELLED' }); return }
 
       try {
         const { items, groups } = await scanEngine.run(
@@ -227,11 +231,8 @@ figma.ui.onmessage = async (rawMsg: unknown) => {
         const noFontProps    = cacheEntries.filter(([, c]) => c && c.remote && (!c.fontFamily || !c.fontStyle || c.fontSize == null)).length
         console.log(`[TRACE SCAN] cache after scan — total:${cacheEntries.length} local:${localInCache} library:${libraryInCache} unresolved:${unresolved} library-no-font-props:${noFontProps}`)
 
-        // Print first 5 library entries to verify font props are set
         const libEntries = cacheEntries.filter(([, c]) => c && c.remote).slice(0,5)
-        for (const [id, c] of libEntries) {
-          console.log(`[TRACE SCAN] library cache entry id=${id}`, JSON.stringify(c))
-        }
+        for (const [id, c] of libEntries) console.log(`[TRACE SCAN] library entry id=${id}`, JSON.stringify(c))
 
         const scopeLabel = scope === 'selection' ? 'Selection' : scope === 'page' ? figma.currentPage.name : 'Entire File'
         const tSerial = Date.now()
