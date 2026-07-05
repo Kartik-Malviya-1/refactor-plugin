@@ -12,6 +12,7 @@ import {
   preloadStyleCacheAsync,
   type PreloadStats,
 } from '../modules/typography/scanner'
+import { buildCatalogAsync, getCatalogStyles, clearCatalogCache } from './catalog'
 import { navigateToLocations } from './navigation'
 import { runAllBenchmarks } from '../benchmarks/runner'
 import type { UIToPluginMessage, PluginToUIMessage } from '../shared/messages'
@@ -47,63 +48,65 @@ function classifyGroupSources(groups: AuditResult['groups']): void {
 }
 
 // ---------------------------------------------------------------------------
-// Sprint A: Foundation Coverage Report
-//
-// Printed after every scan. Covers:
-//   1. Text style coverage (applied vs resolved)
-//   2. Source distribution (how signatures classify)
-//   3. Unknown source count (must be 0)
-//   4. Usage integrity (group.count === group.items.length)
+// Sprint A+B: Foundation Coverage Report
 // ---------------------------------------------------------------------------
 
 function printCoverageReport(preloadStats: PreloadStats, preloadMs: number, groups: AuditResult['groups']): void {
-  const W = 56
+  const W = 58
   const line = '═'.repeat(W)
   const mid  = '─'.repeat(W)
   const pct  = (n: number, d: number): string => d > 0 ? `${Math.round(n/d*100)}%` : 'N/A'
 
   console.log('')
   console.log(`  ╔${line}╗`)
-  console.log(`  ║  Sprint A — Foundation Coverage Report${' '.repeat(W-40)}║`)
+  console.log(`  ║  Foundation Coverage Report${' '.repeat(W-28)}║`)
   console.log(`  ╠${line}╣`)
-
-  // Performance
   console.log(`  ║  Preload:${' '.repeat(W-9)}║`)
-  console.log(`  ║    time:              ${String(preloadMs+'ms').padStart(8)}${' '.repeat(W-31)}║`)
-
+  console.log(`  ║    time:              ${String(preloadMs+'ms').padStart(8)}${' '.repeat(W-33)}║`)
   console.log(`  ╠${mid}╣`)
 
-  // Text Style Coverage
-  const styleCov = pct(preloadStats.resolved, preloadStats.totalIds)
+  const styleCov  = pct(preloadStats.resolved, preloadStats.totalIds)
   const styleFlag = preloadStats.unresolved === 0 ? '✓' : '✗'
-  console.log(`  ║  Text Styles${' '.repeat(W-13)}║`)
-  console.log(`  ║    Applied (unique IDs): ${String(preloadStats.totalIds).padStart(6)}${' '.repeat(W-35)}║`)
-  console.log(`  ║    Resolved — local:    ${String(preloadStats.localCount).padStart(6)}${' '.repeat(W-35)}║`)
-  console.log(`  ║    Resolved — library:  ${String(preloadStats.libraryCount).padStart(6)}${' '.repeat(W-35)}║`)
-  console.log(`  ║    Unresolved:          ${String(preloadStats.unresolved).padStart(6)}${' '.repeat(W-35)}║`)
-  console.log(`  ║    Coverage:            ${(styleCov+' '+styleFlag).padStart(8)}${' '.repeat(W-37)}║`)
+  console.log(`  ║  Text Styles (scan scope)${' '.repeat(W-25)}║`)
+  console.log(`  ║    Applied (unique IDs): ${String(preloadStats.totalIds).padStart(6)}${' '.repeat(W-37)}║`)
+  console.log(`  ║    Resolved — local:    ${String(preloadStats.localCount).padStart(6)}${' '.repeat(W-37)}║`)
+  console.log(`  ║    Resolved — library:  ${String(preloadStats.libraryCount).padStart(6)}${' '.repeat(W-37)}║`)
+  console.log(`  ║    Unresolved:          ${String(preloadStats.unresolved).padStart(6)}${' '.repeat(W-37)}║`)
+  console.log(`  ║    Coverage:            ${(styleCov+' '+styleFlag).padStart(8)}${' '.repeat(W-39)}║`)
+
+  // Catalog stats (built from full file, more complete than scan scope)
+  const catalog    = getCatalogStyles()
+  const catLocal   = catalog.filter(s => s.isLocal).length
+  const catLibrary = catalog.filter(s => !s.isLocal).length
+  console.log(`  ╠${mid}╣`)
+  console.log(`  ║  Style Catalog (full file)${' '.repeat(W-26)}║`)
+  console.log(`  ║    Local:               ${String(catLocal).padStart(6)}${' '.repeat(W-37)}║`)
+  console.log(`  ║    Library:             ${String(catLibrary).padStart(6)}${' '.repeat(W-37)}║`)
+  console.log(`  ║    Total:               ${String(catalog.length).padStart(6)}${' '.repeat(W-37)}║`)
+
+  // Validation: catalog library count should be >= scan-scope library count
+  if (catLibrary < preloadStats.libraryCount) {
+    console.log(`  ║  WARN: catalog library(${catLibrary}) < scope library(${preloadStats.libraryCount})${' '.repeat(Math.max(0,W-43-String(catLibrary).length-String(preloadStats.libraryCount).length))}║`)
+  }
 
   console.log(`  ╠${mid}╣`)
 
-  // Source Distribution
+  // Source distribution
   const total = groups.length
   const dist: Record<string, number> = {}
   for (const g of groups) { const s = g.source ?? 'Unknown'; dist[s] = (dist[s] ?? 0) + 1 }
   const unknown = dist['Unknown'] ?? 0
   console.log(`  ║  Source Distribution (${total} signatures)${' '.repeat(Math.max(0,W-24-String(total).length))}║`)
-  const srcOrder = ['Raw Values','Local Text Style','Library Text Style','Variable','Unknown']
-  for (const src of srcOrder) {
+  for (const src of ['Raw Values','Local Text Style','Library Text Style','Variable','Unknown']) {
     const n   = dist[src] ?? 0
     const p   = total > 0 ? Math.round(n/total*100) : 0
     const flag = src === 'Unknown' ? (n > 0 ? ' ✗' : ' ✓') : ''
-    const label = `${src}:`.padEnd(24)
+    const label = `${src}:`.padEnd(26)
     const value = `${n} (${p}%)${flag}`
-    console.log(`  ║    ${label} ${value.padStart(10)}${' '.repeat(Math.max(0,W-5-24-11))}║`)
+    console.log(`  ║    ${label} ${value.padStart(10)}${' '.repeat(Math.max(0,W-7-26-11))}║`)
   }
 
-  console.log(`  ╠${mid}╣`)
-
-  // Usage Integrity
+  // Usage integrity
   let usageErrors = 0
   for (const g of groups) {
     if (g.count !== g.items.length) {
@@ -112,14 +115,9 @@ function printCoverageReport(preloadStats: PreloadStats, preloadMs: number, grou
     }
   }
   const usageFlag = usageErrors === 0 ? '✓' : `✗ ${usageErrors} error(s)`
+  console.log(`  ╠${mid}╣`)
   console.log(`  ║  Usage Integrity: ${usageFlag}${' '.repeat(Math.max(0,W-18-usageFlag.length))}║`)
-
-  if (unknown > 0) {
-    console.log(`  ╠${mid}╣`)
-    console.log(`  ║  SOURCE ERROR: ${unknown} signature(s) have Unknown source${' '.repeat(Math.max(0,W-38-String(unknown).length))}║`)
-    console.error(`[Refactor] ${unknown} Unknown source(s) found — review resolveSource() and classifyGroupSources()`)
-  }
-
+  if (unknown > 0) console.error(`[Refactor] ${unknown} Unknown source(s) — check resolveSource()`)
   console.log(`  ╚${line}╝`)
   console.log('')
 }
@@ -207,82 +205,54 @@ figma.ui.onmessage = async (rawMsg: unknown) => {
     }
 
     case 'GET_PLANNING_DATA': {
+      // Serve the canonical style catalog built after the last scan.
+      // The catalog (catalog.ts) always includes ALL local styles (via
+      // getLocalTextStylesAsync) + ALL library styles from the full document
+      // (full-file traversal for page/selection scopes, or _styleCache for
+      // file scope). This replaces the previous usage-driven approach that
+      // omitted styles not used in the scanned scope.
       const tPlan = Date.now()
-      const textStyles: AvailableTextStyle[] = []
-      const variables: AvailableTypographyVariable[] = []
-      let localCount = 0, libraryCount = 0
+      let textStyles: AvailableTextStyle[] = getCatalogStyles()
 
-      // ── Stage 1: local text styles ────────────────────────────────────────
-      let localStyleIds = new Set<string>()
-      try {
-        const localStylesList = await figma.getLocalTextStylesAsync()
-        localCount = localStylesList.length
-        localStyleIds = new Set(localStylesList.map(s => s.id))
-        for (const s of localStylesList) {
-          const fn = s.fontName as FontName
-          textStyles.push({ id: s.id, name: s.name, fontFamily: fn.family, fontStyle: fn.style, fontSize: s.fontSize as number, isLocal: true })
-        }
-        if (DEBUG) console.log(`[DEBUG] local styles: ${localCount}`)
-      } catch (err) {
-        console.error('[Refactor] GET_PLANNING_DATA stage 1 (local) failed:', err)
-      }
-
-      // ── Stage 2: library styles from scan cache ──────────────────────────
-      try {
-        const discoveredStyles = getDiscoveredStyles()
-        let noFontDropped = 0
-
-        for (const [styleId, cached] of discoveredStyles) {
-          if (!cached || !cached.remote || localStyleIds.has(styleId)) continue
-          if (!cached.fontFamily || !cached.fontStyle || cached.fontSize == null) {
-            noFontDropped++
-            continue
+      if (textStyles.length === 0) {
+        // No scan has run yet — return local styles as a minimum viable catalog.
+        // Library styles require a scan to discover and will appear after one.
+        try {
+          const local = await figma.getLocalTextStylesAsync()
+          for (const s of local) {
+            const fn = s.fontName as FontName
+            if (!fn || typeof fn.family !== 'string') continue
+            textStyles.push({
+              id: s.id, name: s.name,
+              fontFamily: fn.family, fontStyle: fn.style,
+              fontSize: typeof s.fontSize === 'number' ? s.fontSize : 0,
+              isLocal: true,
+            })
           }
-          const segments = cached.name.split('/')
-          textStyles.push({
-            id: styleId, name: cached.name,
-            fontFamily: cached.fontFamily, fontStyle: cached.fontStyle, fontSize: cached.fontSize,
-            isLocal: false,
-            libraryName: segments.length > 1 ? segments[0].trim() : undefined,
-          })
-          libraryCount++
+          if (DEBUG) console.log(`[DEBUG] pre-scan fallback: ${textStyles.length} local styles`)
+        } catch (err) {
+          console.error('[Refactor] GET_PLANNING_DATA fallback failed:', err)
         }
-
-        if (noFontDropped > 0) console.warn(`[Refactor] ${noFontDropped} library style(s) missing font props — excluded from payload`)
-        if (DEBUG) console.log(`[DEBUG] library styles: ${libraryCount}`)
-      } catch (err) {
-        console.error('[Refactor] GET_PLANNING_DATA stage 2 (library) failed:', err)
       }
 
-      // ── Stage 3: variables ──────────────────────────────────────────────
+      const variables: AvailableTypographyVariable[] = []
       try {
         const collections = figma.variables.getLocalVariableCollections()
-        for (const collection of collections) {
-          for (const varId of collection.variableIds) {
-            const variable = figma.variables.getVariableById(varId)
-            if (variable && (variable.resolvedType === 'STRING' || variable.resolvedType === 'FLOAT')) {
-              variables.push({ id: variable.id, name: variable.name, collectionName: collection.name, resolvedType: variable.resolvedType })
+        for (const c of collections) {
+          for (const varId of c.variableIds) {
+            const v = figma.variables.getVariableById(varId)
+            if (v && (v.resolvedType === 'STRING' || v.resolvedType === 'FLOAT')) {
+              variables.push({ id: v.id, name: v.name, collectionName: c.name, resolvedType: v.resolvedType })
             }
           }
         }
       } catch { /* variables API not available */ }
 
-      // ── Verification ────────────────────────────────────────────────
-      const cacheView = getDiscoveredStyles()
-      const cacheLibrary    = [...cacheView.values()].filter(c => c &&  c.remote).length
-      const cacheUnresolved = [...cacheView.values()].filter(c => c === null).length
-      const planMs = Date.now() - tPlan
+      const localN = textStyles.filter(s => s.isLocal).length
+      const libN   = textStyles.filter(s => !s.isLocal).length
+      console.log(`[Refactor] Planning data — ${localN} local + ${libN} library = ${textStyles.length} styles + ${variables.length} vars (${Date.now()-tPlan}ms)`)
 
-      console.log(`[Refactor] Planning data — local:${localCount} library:${libraryCount} total:${textStyles.length} vars:${variables.length} (${planMs}ms)`)
-      console.log(`[Refactor] Cache state   — library:${cacheLibrary} unresolved:${cacheUnresolved}`)
-
-      if (libraryCount !== cacheLibrary) {
-        console.warn(`[Refactor] ASSERT: cache.library(${cacheLibrary}) ≠ payload.library(${libraryCount}) — ${cacheLibrary-libraryCount} dropped`)
-      }
-      if (textStyles.length !== localCount + libraryCount) {
-        console.error(`[Refactor] ASSERT FAILED: total(${textStyles.length}) ≠ local(${localCount})+library(${libraryCount})`)
-      }
-
+      // Always send — spinner clears even if catalog is empty
       send({ type: 'PLANNING_DATA', payload: { textStyles, variables } })
       break
     }
@@ -295,11 +265,12 @@ figma.ui.onmessage = async (rawMsg: unknown) => {
       scanCancelled = false
       const tTotal = Date.now()
 
-      clearStyleCache()
+      clearStyleCache()       // scan-scope style cache (source classification)
+      clearCatalogCache()     // canonical style catalog (will be rebuilt below)
       resetExtractionInstrument()
       send({ type: 'SCAN_STARTED', payload: { moduleId, scope } })
 
-      // Phase 1: resolve all textStyleIds async BEFORE the sync extraction pass.
+      // Phase 1: resolve textStyleIds for the scan scope (source classification)
       const tPreload = Date.now()
       const preloadStats = await preloadStyleCacheAsync(scope)
       const preloadMs = Date.now() - tPreload
@@ -315,7 +286,16 @@ figma.ui.onmessage = async (rawMsg: unknown) => {
 
         classifyGroupSources(groups)
 
-        // Sprint A: Foundation Coverage Report
+        // Phase 2: build the canonical Style Catalog from the full document.
+        // This runs BEFORE SCAN_COMPLETE is sent so the catalog is warm when
+        // the UI requests GET_PLANNING_DATA immediately after.
+        try {
+          await buildCatalogAsync(scope)
+        } catch (err) {
+          console.error('[Refactor] catalog build failed:', err)
+        }
+
+        // Sprint A+B: Coverage Report (now includes catalog counts)
         printCoverageReport(preloadStats, preloadMs, groups)
 
         const scopeLabel = scope === 'selection' ? 'Selection' : scope === 'page' ? figma.currentPage.name : 'Entire File'
