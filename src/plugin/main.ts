@@ -25,7 +25,6 @@ registerAdapter(typographyScannerAdapter)
 
 figma.showUI(__html__, { width: 860, height: 620, themeColors: true })
 
-// Set true for per-entry object logs and sample payloads.
 const DEBUG = false
 
 let scanCancelled = false
@@ -48,7 +47,7 @@ function classifyGroupSources(groups: AuditResult['groups']): void {
 }
 
 // ---------------------------------------------------------------------------
-// Sprint A+B: Foundation Coverage Report
+// Coverage Report
 // ---------------------------------------------------------------------------
 
 function printCoverageReport(preloadStats: PreloadStats, preloadMs: number, groups: AuditResult['groups']): void {
@@ -61,63 +60,39 @@ function printCoverageReport(preloadStats: PreloadStats, preloadMs: number, grou
   console.log(`  ╔${line}╗`)
   console.log(`  ║  Foundation Coverage Report${' '.repeat(W-28)}║`)
   console.log(`  ╠${line}╣`)
-  console.log(`  ║  Preload:${' '.repeat(W-9)}║`)
-  console.log(`  ║    time:              ${String(preloadMs+'ms').padStart(8)}${' '.repeat(W-33)}║`)
+  console.log(`  ║  Preload time: ${String(preloadMs+'ms').padStart(8)}${' '.repeat(W-23)}║`)
   console.log(`  ╠${mid}╣`)
 
   const styleCov  = pct(preloadStats.resolved, preloadStats.totalIds)
   const styleFlag = preloadStats.unresolved === 0 ? '✓' : '✗'
   console.log(`  ║  Text Styles (scan scope)${' '.repeat(W-25)}║`)
-  console.log(`  ║    Applied (unique IDs): ${String(preloadStats.totalIds).padStart(6)}${' '.repeat(W-37)}║`)
-  console.log(`  ║    Resolved — local:    ${String(preloadStats.localCount).padStart(6)}${' '.repeat(W-37)}║`)
-  console.log(`  ║    Resolved — library:  ${String(preloadStats.libraryCount).padStart(6)}${' '.repeat(W-37)}║`)
-  console.log(`  ║    Unresolved:          ${String(preloadStats.unresolved).padStart(6)}${' '.repeat(W-37)}║`)
-  console.log(`  ║    Coverage:            ${(styleCov+' '+styleFlag).padStart(8)}${' '.repeat(W-39)}║`)
+  console.log(`  ║    Applied: ${String(preloadStats.totalIds).padStart(6)}  Resolved: ${String(preloadStats.resolved).padStart(6)}  Coverage: ${(styleCov+' '+styleFlag).padStart(6)}${' '.repeat(Math.max(0,W-53))}║`)
 
-  // Catalog stats (built from full file, more complete than scan scope)
   const catalog    = getCatalogStyles()
   const catLocal   = catalog.filter(s => s.isLocal).length
   const catLibrary = catalog.filter(s => !s.isLocal).length
   console.log(`  ╠${mid}╣`)
-  console.log(`  ║  Style Catalog (full file)${' '.repeat(W-26)}║`)
-  console.log(`  ║    Local:               ${String(catLocal).padStart(6)}${' '.repeat(W-37)}║`)
-  console.log(`  ║    Library:             ${String(catLibrary).padStart(6)}${' '.repeat(W-37)}║`)
-  console.log(`  ║    Total:               ${String(catalog.length).padStart(6)}${' '.repeat(W-37)}║`)
+  console.log(`  ║  Style Catalog (full file) — local:${catLocal} library:${catLibrary} total:${catalog.length}${' '.repeat(Math.max(0,W-43-String(catLocal).length-String(catLibrary).length-String(catalog.length).length))}║`)
 
-  // Validation: catalog library count should be >= scan-scope library count
-  if (catLibrary < preloadStats.libraryCount) {
-    console.log(`  ║  WARN: catalog library(${catLibrary}) < scope library(${preloadStats.libraryCount})${' '.repeat(Math.max(0,W-43-String(catLibrary).length-String(preloadStats.libraryCount).length))}║`)
-  }
-
-  console.log(`  ╠${mid}╣`)
-
-  // Source distribution
   const total = groups.length
   const dist: Record<string, number> = {}
   for (const g of groups) { const s = g.source ?? 'Unknown'; dist[s] = (dist[s] ?? 0) + 1 }
   const unknown = dist['Unknown'] ?? 0
+  console.log(`  ╠${mid}╣`)
   console.log(`  ║  Source Distribution (${total} signatures)${' '.repeat(Math.max(0,W-24-String(total).length))}║`)
   for (const src of ['Raw Values','Local Text Style','Library Text Style','Variable','Unknown']) {
-    const n   = dist[src] ?? 0
-    const p   = total > 0 ? Math.round(n/total*100) : 0
+    const n = dist[src] ?? 0
+    const p = total > 0 ? Math.round(n/total*100) : 0
     const flag = src === 'Unknown' ? (n > 0 ? ' ✗' : ' ✓') : ''
-    const label = `${src}:`.padEnd(26)
-    const value = `${n} (${p}%)${flag}`
-    console.log(`  ║    ${label} ${value.padStart(10)}${' '.repeat(Math.max(0,W-7-26-11))}║`)
+    console.log(`  ║    ${`${src}:`.padEnd(22)} ${`${n} (${p}%)${flag}`.padStart(12)}${' '.repeat(Math.max(0,W-38))}║`)
   }
 
-  // Usage integrity
   let usageErrors = 0
-  for (const g of groups) {
-    if (g.count !== g.items.length) {
-      usageErrors++
-      console.error(`  [Refactor] USAGE ERROR "${g.label}": count=${g.count} items=${g.items.length}`)
-    }
-  }
+  for (const g of groups) if (g.count !== g.items.length) { usageErrors++; console.error(`  USAGE ERROR "${g.label}": count=${g.count} items=${g.items.length}`) }
   const usageFlag = usageErrors === 0 ? '✓' : `✗ ${usageErrors} error(s)`
   console.log(`  ╠${mid}╣`)
   console.log(`  ║  Usage Integrity: ${usageFlag}${' '.repeat(Math.max(0,W-18-usageFlag.length))}║`)
-  if (unknown > 0) console.error(`[Refactor] ${unknown} Unknown source(s) — check resolveSource()`)
+  if (unknown > 0) console.error(`[Refactor] ${unknown} Unknown source(s)`)
   console.log(`  ╚${line}╝`)
   console.log('')
 }
@@ -153,17 +128,16 @@ function printDetailedReport(totalMs: number, serialMs: number, msgMs: number, s
   function row(num: string, label: string, ms: number, items: number, il = ''): void {
     console.log(`  ${(num+'  '+label).padEnd(28)}${fmtMs(ms).padStart(9)}   ${pct(ms,totalMs)}  ${items>0?fmtN(items).padStart(9):'        —'}  ${items>0?fmtRate(items,ms).padStart(12):'           —'}  ${il}`)
   }
-  void gi
+  void gi; void msgMs; void serialMs
   console.log('')
   console.log(`  ╔${line}╗`)
   console.log(`  ║  Scan Profile (${scope})${' '.repeat(Math.max(0,W-14-scope.length))}║`)
   console.log(`  ╠${line}╣`)
-  row('1','Traversal',    ti.traversalMs,      V,'nodes')
-  row('4','Extraction',   ei.extractionCallMs, N,'nodes')
+  row('1','Traversal',  ti.traversalMs,      V,'nodes')
+  row('4','Extraction', ei.extractionCallMs, N,'nodes')
   console.log(`  ║  ${'    IPC total'.padEnd(28)}${fmtMs(propMs).padStart(9)}   ${pct(propMs,totalMs)}  ${fmtN(propN).padStart(9)}  ${fmtRate(propN,propMs).padStart(12)}  calls║`)
-  row('7','Grouping',     t.groupingMs,        N,'items')
-  row('8','Sorting',      t.sortingMs,         groupCount,'groups')
-  row('9','Serialization',serialMs,            N,'items')
+  row('7','Grouping',   t.groupingMs,        N,'items')
+  row('8','Sorting',    t.sortingMs,         groupCount,'groups')
   console.log(`  ╠${mid}╣`)
   console.log(`  ║  Total${' '.repeat(W-6)} ${fmtMs(totalMs).padStart(9)}║`)
   console.log(`  ╚${line}╝`)
@@ -175,10 +149,7 @@ function printDetailedReport(totalMs: number, serialMs: number, msgMs: number, s
 // ---------------------------------------------------------------------------
 
 figma.ui.onmessage = async (rawMsg: unknown) => {
-  if ((rawMsg as { type?: string }).type === 'RUN_BENCHMARKS') {
-    await runAllBenchmarks()
-    return
-  }
+  if ((rawMsg as { type?: string }).type === 'RUN_BENCHMARKS') { await runAllBenchmarks(); return }
 
   const msg = rawMsg as UIToPluginMessage
 
@@ -204,35 +175,55 @@ figma.ui.onmessage = async (rawMsg: unknown) => {
       break
     }
 
+    // Sprint D: navigate canvas to a review item’s frame and select changed text layers
+    case 'REVIEW_NAVIGATE': {
+      const { pageId, layerIds } = msg.payload
+      try {
+        const page = figma.root.children.find(p => p.id === pageId)
+        if (!page || page.type !== 'PAGE') {
+          send({ type: 'REVIEW_NAVIGATED', payload: { success: false } }); break
+        }
+        await figma.setCurrentPageAsync(page as PageNode)
+
+        // Resolve text nodes on the (now current) page
+        const nodes: SceneNode[] = []
+        for (const id of layerIds) {
+          const node = figma.getNodeById(id)
+          if (node && node.type === 'TEXT') nodes.push(node as unknown as SceneNode)
+        }
+
+        if (nodes.length > 0) {
+          figma.currentPage.selection = nodes
+          figma.viewport.scrollAndZoomIntoView(nodes)
+        }
+
+        send({ type: 'REVIEW_NAVIGATED', payload: { success: true } })
+      } catch (err) {
+        console.error('[Refactor] REVIEW_NAVIGATE failed:', err)
+        send({ type: 'REVIEW_NAVIGATED', payload: { success: false } })
+      }
+      break
+    }
+
+    // Sprint D: clear canvas selection set by review navigation
+    case 'REVIEW_CLEAR_HIGHLIGHTS': {
+      try { figma.currentPage.selection = [] } catch {}
+      break
+    }
+
     case 'GET_PLANNING_DATA': {
-      // Serve the canonical style catalog built after the last scan.
-      // The catalog (catalog.ts) always includes ALL local styles (via
-      // getLocalTextStylesAsync) + ALL library styles from the full document
-      // (full-file traversal for page/selection scopes, or _styleCache for
-      // file scope). This replaces the previous usage-driven approach that
-      // omitted styles not used in the scanned scope.
       const tPlan = Date.now()
       let textStyles: AvailableTextStyle[] = getCatalogStyles()
 
       if (textStyles.length === 0) {
-        // No scan has run yet — return local styles as a minimum viable catalog.
-        // Library styles require a scan to discover and will appear after one.
         try {
           const local = await figma.getLocalTextStylesAsync()
           for (const s of local) {
             const fn = s.fontName as FontName
             if (!fn || typeof fn.family !== 'string') continue
-            textStyles.push({
-              id: s.id, name: s.name,
-              fontFamily: fn.family, fontStyle: fn.style,
-              fontSize: typeof s.fontSize === 'number' ? s.fontSize : 0,
-              isLocal: true,
-            })
+            textStyles.push({ id: s.id, name: s.name, fontFamily: fn.family, fontStyle: fn.style, fontSize: typeof s.fontSize === 'number' ? s.fontSize : 0, isLocal: true })
           }
-          if (DEBUG) console.log(`[DEBUG] pre-scan fallback: ${textStyles.length} local styles`)
-        } catch (err) {
-          console.error('[Refactor] GET_PLANNING_DATA fallback failed:', err)
-        }
+        } catch (err) { console.error('[Refactor] GET_PLANNING_DATA fallback failed:', err) }
       }
 
       const variables: AvailableTypographyVariable[] = []
@@ -246,13 +237,13 @@ figma.ui.onmessage = async (rawMsg: unknown) => {
             }
           }
         }
-      } catch { /* variables API not available */ }
+      } catch {}
 
       const localN = textStyles.filter(s => s.isLocal).length
       const libN   = textStyles.filter(s => !s.isLocal).length
       console.log(`[Refactor] Planning data — ${localN} local + ${libN} library = ${textStyles.length} styles + ${variables.length} vars (${Date.now()-tPlan}ms)`)
+      if (DEBUG) console.log('[DEBUG] first 5 styles:', JSON.stringify(textStyles.slice(0,5)))
 
-      // Always send — spinner clears even if catalog is empty
       send({ type: 'PLANNING_DATA', payload: { textStyles, variables } })
       break
     }
@@ -265,12 +256,11 @@ figma.ui.onmessage = async (rawMsg: unknown) => {
       scanCancelled = false
       const tTotal = Date.now()
 
-      clearStyleCache()       // scan-scope style cache (source classification)
-      clearCatalogCache()     // canonical style catalog (will be rebuilt below)
+      clearStyleCache()
+      clearCatalogCache()
       resetExtractionInstrument()
       send({ type: 'SCAN_STARTED', payload: { moduleId, scope } })
 
-      // Phase 1: resolve textStyleIds for the scan scope (source classification)
       const tPreload = Date.now()
       const preloadStats = await preloadStyleCacheAsync(scope)
       const preloadMs = Date.now() - tPreload
@@ -286,16 +276,8 @@ figma.ui.onmessage = async (rawMsg: unknown) => {
 
         classifyGroupSources(groups)
 
-        // Phase 2: build the canonical Style Catalog from the full document.
-        // This runs BEFORE SCAN_COMPLETE is sent so the catalog is warm when
-        // the UI requests GET_PLANNING_DATA immediately after.
-        try {
-          await buildCatalogAsync(scope)
-        } catch (err) {
-          console.error('[Refactor] catalog build failed:', err)
-        }
+        try { await buildCatalogAsync(scope) } catch (err) { console.error('[Refactor] catalog build failed:', err) }
 
-        // Sprint A+B: Coverage Report (now includes catalog counts)
         printCoverageReport(preloadStats, preloadMs, groups)
 
         const scopeLabel = scope === 'selection' ? 'Selection' : scope === 'page' ? figma.currentPage.name : 'Entire File'

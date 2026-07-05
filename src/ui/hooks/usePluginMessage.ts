@@ -4,10 +4,9 @@ import { useAuditStore } from '../store/audit'
 import { useUIStore } from '../store/ui'
 import { usePlanningDataStore } from '../store/planningData'
 import { useAssignmentStore } from '../store/assignment'
+import { useReviewStore } from '../store/reviewStore'
 import { sendToPlugin } from './useSendMessage'
 
-// Shared listener registry — TypographyInspector subscribes here to be
-// notified when the plugin sends SHOW_USAGE_EXPLORER (multi-page selection).
 export const _usageExplorerListeners: Array<() => void> = []
 
 export function usePluginMessages(): void {
@@ -26,18 +25,14 @@ export function usePluginMessages(): void {
         case 'SCAN_COMPLETE': {
           setScanResult(msg.payload)
           navigate('typography/overview')
-
-          // Invalidate planning data so the style picker re-fetches after scan.
           usePlanningDataStore.getState().clear()
-
-          // Prune orphan assignments using AuditGroup.key — the canonical
-          // Typography Signature identifier. key is stable across scans of
-          // the same document; id is a derived hash and must NOT be used here.
+          // Prune orphan assignments using canonical signature key
           const validKeys = new Set<string>(msg.payload.groups.map((g: { key: string }) => g.key))
           const pruned = useAssignmentStore.getState().pruneOrphans(validKeys)
-          if (pruned > 0) console.log(`[Refactor] Pruned ${pruned} orphan assignment(s) after scan`)
-
-          // Pre-fetch planning data immediately while _styleCache is warm.
+          if (pruned > 0) console.log(`[Refactor] Pruned ${pruned} orphan assignment(s)`)
+          // Clear review state — items are stale after a new scan
+          useReviewStore.getState().clear()
+          // Pre-fetch planning data while catalog is warm
           setPlanningLoading(true)
           sendToPlugin({ type: 'GET_PLANNING_DATA' })
           break
@@ -73,6 +68,11 @@ export function usePluginMessages(): void {
 
         case 'SHOW_USAGE_EXPLORER':
           for (const cb of _usageExplorerListeners) cb()
+          break
+
+        case 'REVIEW_NAVIGATED':
+          // Navigation result — show toast only on failure
+          if (!msg.payload.success) showToast('Could not navigate to frame', 'error')
           break
       }
     }
