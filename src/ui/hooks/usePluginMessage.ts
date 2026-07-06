@@ -1,11 +1,12 @@
 import { useEffect } from 'react'
 import type { PluginToUIMessage } from '../../shared/messages'
-import { useAuditStore } from '../store/audit'
-import { useUIStore } from '../store/ui'
+import { useAuditStore }    from '../store/audit'
+import { useUIStore }       from '../store/ui'
 import { usePlanningDataStore } from '../store/planningData'
-import { useAssignmentStore } from '../store/assignment'
-import { useReviewStore } from '../store/reviewStore'
-import { sendToPlugin } from './useSendMessage'
+import { useAssignmentStore }  from '../store/assignment'
+import { useReviewStore }      from '../store/reviewStore'
+import { usePreviewStore }     from '../store/previewStore'
+import { sendToPlugin }        from './useSendMessage'
 
 export const _usageExplorerListeners: Array<() => void> = []
 
@@ -26,13 +27,11 @@ export function usePluginMessages(): void {
           setScanResult(msg.payload)
           navigate('typography/overview')
           usePlanningDataStore.getState().clear()
-          // Prune orphan assignments using canonical signature key
+          usePreviewStore.getState().clear()   // invalidate preview cache
+          useReviewStore.getState().clear()    // review state is stale
           const validKeys = new Set<string>(msg.payload.groups.map((g: { key: string }) => g.key))
           const pruned = useAssignmentStore.getState().pruneOrphans(validKeys)
           if (pruned > 0) console.log(`[Refactor] Pruned ${pruned} orphan assignment(s)`)
-          // Clear review state — items are stale after a new scan
-          useReviewStore.getState().clear()
-          // Pre-fetch planning data while catalog is warm
           setPlanningLoading(true)
           sendToPlugin({ type: 'GET_PLANNING_DATA' })
           break
@@ -71,9 +70,20 @@ export function usePluginMessages(): void {
           break
 
         case 'REVIEW_NAVIGATED':
-          // Navigation result — show toast only on failure
           if (!msg.payload.success) showToast('Could not navigate to frame', 'error')
           break
+
+        // Sprint D — Preview Engine
+        case 'PREVIEW_READY': {
+          const { itemId, before, after } = msg.payload
+          usePreviewStore.getState().setReady(itemId, before, after)
+          break
+        }
+        case 'PREVIEW_ERROR': {
+          const { itemId, error } = msg.payload
+          usePreviewStore.getState().setError(itemId, error)
+          break
+        }
       }
     }
 
