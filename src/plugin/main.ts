@@ -60,19 +60,19 @@ figma.ui.onmessage = async (rawMsg: unknown) => {
       else send({ type: 'NAVIGATION_ERROR', payload: { error: out.error.message, code: out.error.code } })
       break
     }
+
     case 'REVIEW_NAVIGATE': {
-      const { pageId, layerIds } = msg.payload
+      // Simplified: switch to the correct page only.
+      // Node selection and scrollAndZoomIntoView were causing unrecoverable
+      // errors in the dynamic-page plugin context. Page switching alone gives
+      // the user the correct canvas context for visual review.
+      const { pageId } = msg.payload
       try {
         const page = figma.root.children.find(p => p.id === pageId)
-        if (!page || page.type !== 'PAGE') { send({ type: 'REVIEW_NAVIGATED', payload: { success: false } }); break }
-        await figma.setCurrentPageAsync(page as PageNode)
-        // figma.getNodeById is forbidden in dynamic-page mode — must use async variant
-        const nodes: SceneNode[] = []
-        for (const id of layerIds) {
-          const n = await figma.getNodeByIdAsync(id)
-          if (n && n.type === 'TEXT') nodes.push(n as unknown as SceneNode)
+        if (!page || page.type !== 'PAGE') {
+          send({ type: 'REVIEW_NAVIGATED', payload: { success: false } }); break
         }
-        if (nodes.length) { figma.currentPage.selection = nodes; figma.viewport.scrollAndZoomIntoView(nodes) }
+        await figma.setCurrentPageAsync(page as PageNode)
         send({ type: 'REVIEW_NAVIGATED', payload: { success: true } })
       } catch (err) {
         console.error('[Refactor] REVIEW_NAVIGATE failed:', err)
@@ -80,13 +80,19 @@ figma.ui.onmessage = async (rawMsg: unknown) => {
       }
       break
     }
-    case 'REVIEW_CLEAR_HIGHLIGHTS': { try { figma.currentPage.selection = [] } catch {}; break }
+
+    case 'REVIEW_CLEAR_HIGHLIGHTS': {
+      // No-op: highlights were removed along with node selection.
+      break
+    }
+
     case 'GENERATE_PREVIEW': {
       const { itemId, pageId, layerIds, mutations } = msg.payload
       try { const r = await generatePreview(pageId, layerIds, mutations); send({ type: 'PREVIEW_READY', payload: { itemId, before: r.before, after: r.after } }) }
       catch (err) { send({ type: 'PREVIEW_ERROR', payload: { itemId, error: err instanceof Error ? err.message : String(err) } }) }
       break
     }
+
     case 'APPLY_PLAN': {
       const { entries } = msg.payload
       console.log(`[Refactor] APPLY_PLAN: ${entries.length} entries`)
@@ -99,6 +105,7 @@ figma.ui.onmessage = async (rawMsg: unknown) => {
       }
       break
     }
+
     case 'GET_PLANNING_DATA': {
       const tPlan = Date.now()
       let textStyles: AvailableTextStyle[] = getCatalogStyles()
@@ -119,6 +126,7 @@ figma.ui.onmessage = async (rawMsg: unknown) => {
       if (DEBUG) console.log('[DEBUG]', JSON.stringify(textStyles.slice(0,3)))
       send({ type: 'PLANNING_DATA', payload: { textStyles, variables } }); break
     }
+
     case 'START_SCAN': {
       const { moduleId, scope } = msg.payload
       const adapter = getAdapter(moduleId)
