@@ -21,6 +21,8 @@ export type UIToPluginMessage =
   | { type: 'REVIEW_CLEAR_HIGHLIGHTS' }
   | { type: 'GENERATE_PREVIEW';  payload: { itemId: string; pageId: string; layerIds: string[]; mutations: LayerMutation[] } }
   | { type: 'APPLY_PLAN';        payload: { entries: ApplyEntry[] } }
+  /** Navigate to a page and select + zoom to specific nodes. Used for post-apply highlighting. */
+  | { type: 'HIGHLIGHT_NODES';   payload: { pageId: string; nodeIds: string[] } }
 
 export type PluginToUIMessage =
   | { type: 'SCAN_STARTED';      payload: { moduleId: string; scope: ScanScope } }

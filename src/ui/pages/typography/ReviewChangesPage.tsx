@@ -2,7 +2,7 @@ import { useMemo, useEffect } from 'react'
 import {
   ChevronRight, ChevronLeft, ArrowLeft,
   CheckCircle, AlertTriangle, SkipForward, Target,
-  Loader2, Lock, CheckCheck, Copy,
+  Loader2, Lock, CheckCheck, Copy, Eye,
 } from 'lucide-react'
 import { useAuditStore }      from '../../store/audit'
 import { useAssignmentStore } from '../../store/assignment'
@@ -15,6 +15,7 @@ import type { ReviewItem, ReviewStatus } from '../../../shared/review'
 import type { AuditGroup } from '../../../shared/types'
 import type { TypographyProperties } from '../../../modules/typography/types'
 import type { ApplyEntry } from '../../../shared/apply-types'
+import type { MutationResult } from '../../../shared/apply-types'
 import { cn } from '../../lib/cn'
 
 function buildApplyEntries(
@@ -156,11 +157,28 @@ function ReportView({ onDone }: { onDone: () => void }) {
   const { report } = useApplyStore()
   if (!report) return null
   const dur = report.durationMs >= 1000 ? `${(report.durationMs/1000).toFixed(1)}s` : `${report.durationMs}ms`
+
+  // Group successful results by page for the "View on canvas" buttons
+  const successByPage = useMemo(() => {
+    const map = new Map<string, { pageName: string; nodeIds: string[] }>()
+    for (const r of report.results) {
+      if (r.status !== 'success') continue
+      if (!map.has(r.pageId)) map.set(r.pageId, { pageName: r.pageName, nodeIds: [] })
+      map.get(r.pageId)!.nodeIds.push(r.nodeId)
+    }
+    return [...map.entries()].map(([pageId, v]) => ({ pageId, ...v }))
+  }, [report])
+
   function copyReport() {
     const lines = [`Typography Migration — ${new Date(report.completedAt).toLocaleString()}`, `Duration: ${dur}`, `Applied: ${report.successful}  Skipped: ${report.skipped}  Failed: ${report.failed}  Total: ${report.totalNodes}`]
-    if (report.failed > 0) { lines.push('', 'Failures:'); for (const r of report.results.filter(r=>r.status==='failed').slice(0,20)) lines.push(`  [${r.pageName}] ${r.nodeName}: ${r.error}`) }
+    if (report.failed > 0) { lines.push('', 'Failures:'); for (const r of (report.results as MutationResult[]).filter(r=>r.status==='failed').slice(0,20)) lines.push(`  [${r.pageName}] ${r.nodeName}: ${r.error}`) }
     navigator.clipboard?.writeText(lines.join('\n')).catch(()=>{})
   }
+
+  function viewOnCanvas(pageId: string, nodeIds: string[]) {
+    sendToPlugin({ type: 'HIGHLIGHT_NODES', payload: { pageId, nodeIds } })
+  }
+
   return (
     <div className="flex flex-col h-full overflow-hidden">
       <div className="flex-1 overflow-y-auto p-4">
@@ -171,7 +189,8 @@ function ReportView({ onDone }: { onDone: () => void }) {
           <p className="text-base font-semibold text-ink">{report.failed > 0 ? 'Migration complete with issues' : 'Migration complete'}</p>
           <p className="text-xs text-ink-3 mt-1">{dur}</p>
         </div>
-        <div className="grid grid-cols-2 gap-2">
+
+        <div className="grid grid-cols-2 gap-2 mb-4">
           {[{label:'Applied',value:report.successful,cls:'text-success'},{label:'Skipped',value:report.skipped,cls:'text-ink-2'},{label:'Failed',value:report.failed,cls:report.failed>0?'text-error':'text-ink-2'},{label:'Total',value:report.totalNodes,cls:'text-ink'}].map(({label,value,cls})=>(
             <div key={label} className="border border-border rounded-lg p-2.5 text-center">
               <p className={cn('text-xl font-bold tabular-nums',cls)}>{value.toLocaleString()}</p>
@@ -179,10 +198,31 @@ function ReportView({ onDone }: { onDone: () => void }) {
             </div>
           ))}
         </div>
+
+        {/* Per-page view buttons */}
+        {successByPage.length > 0 && (
+          <div className="mb-4">
+            <p className="text-2xs font-semibold text-ink-disabled uppercase tracking-widest mb-2">Changed layers</p>
+            <div className="space-y-1.5">
+              {successByPage.map(({ pageId, pageName, nodeIds }) => (
+                <button key={pageId} onClick={() => viewOnCanvas(pageId, nodeIds)}
+                  className="w-full flex items-center gap-2 px-3 py-2 rounded border border-border hover:border-border-strong hover:bg-surface-hover transition-colors text-left">
+                  <Eye className="w-3.5 h-3.5 text-ink-3 shrink-0" />
+                  <div className="flex-1 min-w-0">
+                    <p className="text-xs font-medium text-ink truncate">{pageName}</p>
+                    <p className="text-2xs text-ink-3">{nodeIds.length} layer{nodeIds.length !== 1 ? 's' : ''} changed</p>
+                  </div>
+                  <span className="text-2xs text-accent shrink-0">View →</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
         {report.failed > 0 && (
-          <div className="border border-warning/30 bg-warning-subtle/40 rounded-lg p-3 mt-3">
+          <div className="border border-warning/30 bg-warning-subtle/40 rounded-lg p-3">
             <p className="text-xs font-semibold text-warning mb-1">Failures</p>
-            {report.results.filter(r=>r.status==='failed').slice(0,5).map((r,i)=>(
+            {(report.results as MutationResult[]).filter(r=>r.status==='failed').slice(0,5).map((r,i)=>(
               <p key={i} className="text-2xs text-ink-3 truncate">[{r.pageName}] {r.nodeName}: {r.error}</p>
             ))}
             {report.failed > 5 && <p className="text-2xs text-ink-disabled">+{report.failed-5} more</p>}
@@ -276,6 +316,8 @@ export function ReviewChangesPage() {
   const currentIndex = currentItem ? reviewItems.indexOf(currentItem) : -1
   const visitedCount = reviewItems.filter(i => statuses[i.id] && statuses[i.id] !== 'unread').length
 
+  // Navigate canvas when a review item opens: selects the affected text nodes
+  // so the user can see exactly what will change before clicking Apply.
   useEffect(() => {
     if (!currentItem) return
     const layerIds = [...new Set(currentItem.changes.map(c => c.layerId))]

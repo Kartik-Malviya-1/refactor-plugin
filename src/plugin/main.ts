@@ -43,6 +43,23 @@ function logCoverage(ps: PreloadStats, ms: number, groups: AuditResult['groups']
   for (const g of groups) if (g.count !== g.items.length) console.error(`[Refactor] USAGE ERROR "${g.label}"`)
 }
 
+/** Switch to a page, select nodes by ID, and zoom to fit. */
+async function navigateAndSelect(pageId: string, nodeIds: string[]): Promise<void> {
+  const page = figma.root.children.find(p => p.id === pageId)
+  if (!page || page.type !== 'PAGE') return
+  await figma.setCurrentPageAsync(page as PageNode)
+  const nodes: SceneNode[] = []
+  for (const id of nodeIds) {
+    const n = await figma.getNodeByIdAsync(id)
+    if (n && (n.type === 'TEXT' || n.type === 'FRAME' || n.type === 'COMPONENT' || n.type === 'INSTANCE'))
+      nodes.push(n as unknown as SceneNode)
+  }
+  if (nodes.length) {
+    figma.currentPage.selection = nodes
+    figma.viewport.scrollAndZoomIntoView(nodes)
+  }
+}
+
 figma.ui.onmessage = async (rawMsg: unknown) => {
   if ((rawMsg as { type?: string }).type === 'RUN_BENCHMARKS') { await runAllBenchmarks(); return }
   const msg = rawMsg as UIToPluginMessage
@@ -61,18 +78,12 @@ figma.ui.onmessage = async (rawMsg: unknown) => {
       break
     }
 
+    // Review navigation: switch page + select affected text nodes so user
+    // can see exactly which layers will change before clicking Apply.
     case 'REVIEW_NAVIGATE': {
-      // Simplified: switch to the correct page only.
-      // Node selection and scrollAndZoomIntoView were causing unrecoverable
-      // errors in the dynamic-page plugin context. Page switching alone gives
-      // the user the correct canvas context for visual review.
-      const { pageId } = msg.payload
+      const { pageId, layerIds } = msg.payload
       try {
-        const page = figma.root.children.find(p => p.id === pageId)
-        if (!page || page.type !== 'PAGE') {
-          send({ type: 'REVIEW_NAVIGATED', payload: { success: false } }); break
-        }
-        await figma.setCurrentPageAsync(page as PageNode)
+        await navigateAndSelect(pageId, layerIds)
         send({ type: 'REVIEW_NAVIGATED', payload: { success: true } })
       } catch (err) {
         console.error('[Refactor] REVIEW_NAVIGATE failed:', err)
@@ -80,9 +91,16 @@ figma.ui.onmessage = async (rawMsg: unknown) => {
       }
       break
     }
-
     case 'REVIEW_CLEAR_HIGHLIGHTS': {
-      // No-op: highlights were removed along with node selection.
+      try { figma.currentPage.selection = [] } catch {}; break
+    }
+
+    // Post-apply highlight: navigate to a page and select changed nodes.
+    case 'HIGHLIGHT_NODES': {
+      const { pageId, nodeIds } = msg.payload
+      try { await navigateAndSelect(pageId, nodeIds) } catch (err) {
+        console.error('[Refactor] HIGHLIGHT_NODES failed:', err)
+      }
       break
     }
 
@@ -99,6 +117,16 @@ figma.ui.onmessage = async (rawMsg: unknown) => {
       try {
         const report = await runApplyEngine(entries, (p) => send({ type: 'APPLY_PROGRESS', payload: p }))
         send({ type: 'APPLY_COMPLETE', payload: report })
+
+        // Auto-highlight: immediately select all successfully changed nodes
+        // on the current page so the user can see what changed right away.
+        const currentPageId = figma.currentPage.id
+        const successIds = report.results
+          .filter(r => r.status === 'success' && r.pageId === currentPageId)
+          .map(r => r.nodeId)
+        if (successIds.length > 0) {
+          try { await navigateAndSelect(currentPageId, successIds) } catch {}
+        }
       } catch (err) {
         console.error('[Refactor] APPLY_PLAN failed:', err)
         send({ type: 'APPLY_COMPLETE', payload: { startedAt: Date.now(), completedAt: Date.now(), durationMs: 0, totalNodes: entries.length, successful: 0, skipped: 0, failed: entries.length, blocked: 0, results: [] } })
