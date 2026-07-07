@@ -1,10 +1,9 @@
 import type { ApplyEntry, MutationResult, MutationStatus, ApplyProgress, MigrationReport } from '../shared/apply-types'
-import type { NewStyleTarget, ManualValuesTarget } from '../shared/migration'
+import type { NewStyleTarget, ManualValuesTarget, ExistingVariableTarget } from '../shared/migration'
 
 const PROGRESS_BATCH = 50
 
 async function validateEntry(e: ApplyEntry): Promise<{ valid: boolean; reason?: string }> {
-  // figma.getNodeById is forbidden in dynamic-page mode — must use async variant
   const node = await figma.getNodeByIdAsync(e.nodeId)
   if (!node) return { valid: false, reason: 'Node no longer exists' }
   if (node.type !== 'TEXT') return { valid: false, reason: `Expected TEXT, got ${node.type}` }
@@ -16,8 +15,10 @@ async function validateEntry(e: ApplyEntry): Promise<{ valid: boolean; reason?: 
     if (s.type !== 'TEXT') return { valid: false, reason: 'Style is not TEXT' }
   }
   if (t.type === 'existing-variable') {
-    try { if (!figma.variables.getVariableById(t.variableId)) return { valid: false, reason: `Variable missing: ${t.variableName}` } }
-    catch { return { valid: false, reason: 'Variables API unavailable' } }
+    try {
+      const v = figma.variables.getVariableById(t.variableId)
+      if (!v) return { valid: false, reason: `Variable missing: ${t.variableName}` }
+    } catch { return { valid: false, reason: 'Variables API unavailable' } }
   }
   return { valid: true }
 }
@@ -60,7 +61,6 @@ async function buildNewStyleCache(entries: ApplyEntry[]): Promise<Map<string, st
 }
 
 async function applyMutation(e: ApplyEntry, nsCache: Map<string, string>): Promise<{ status: MutationStatus; error?: string }> {
-  // figma.getNodeById is forbidden in dynamic-page mode
   const node = await figma.getNodeByIdAsync(e.nodeId)
   if (!node || node.type !== 'TEXT') return { status: 'failed', error: 'Node missing or wrong type' }
   const tn = node as TextNode
@@ -68,12 +68,19 @@ async function applyMutation(e: ApplyEntry, nsCache: Map<string, string>): Promi
   const t = e.target
   try {
     if (t.type === 'skip') return { status: 'skipped' }
-    if (t.type === 'existing-style') { await tn.setTextStyleIdAsync(t.styleId); return { status: 'success' } }
+
+    if (t.type === 'existing-style') {
+      await tn.setTextStyleIdAsync(t.styleId)
+      return { status: 'success' }
+    }
+
     if (t.type === 'new-style') {
       const id = nsCache.get((t as NewStyleTarget).name)
       if (!id) return { status: 'failed', error: `Style not created: ${(t as NewStyleTarget).name}` }
-      await tn.setTextStyleIdAsync(id); return { status: 'success' }
+      await tn.setTextStyleIdAsync(id)
+      return { status: 'success' }
     }
+
     if (t.type === 'manual-values') {
       const mv = t as ManualValuesTarget
       tn.fontName = { family: mv.fontFamily, style: mv.fontStyle }
@@ -82,8 +89,30 @@ async function applyMutation(e: ApplyEntry, nsCache: Map<string, string>): Promi
       tn.letterSpacing = { unit: mv.letterSpacingUnit as 'PIXELS' | 'PERCENT', value: mv.letterSpacingValue }
       return { status: 'success' }
     }
-    if (t.type === 'existing-variable') return { status: 'skipped', error: 'Variable binding not yet supported' }
-    return { status: 'skipped', error: `Unknown: ${(t as { type: string }).type}` }
+
+    if (t.type === 'existing-variable') {
+      const vt = t as ExistingVariableTarget
+      const variable = figma.variables.getVariableById(vt.variableId)
+      if (!variable) return { status: 'failed', error: `Variable not found: ${vt.variableName}` }
+
+      // Determine which text property to bind.
+      // Use explicit targetField if provided, otherwise auto-select based on resolvedType:
+      //   FLOAT  → fontSize  (covers font-size tokens)
+      //   STRING → fontFamily (covers font-family tokens)
+      const field = (vt.targetField as VariableBindableTextField | undefined) ??
+        (variable.resolvedType === 'FLOAT'  ? 'fontSize'   :
+         variable.resolvedType === 'STRING' ? 'fontFamily' : null)
+
+      if (!field) {
+        return { status: 'skipped', error: `Variable type ${variable.resolvedType} cannot be bound to a text property` }
+      }
+
+      // setBoundVariable is synchronous in the Figma Plugin API
+      tn.setBoundVariable(field, variable)
+      return { status: 'success' }
+    }
+
+    return { status: 'skipped', error: `Unknown target: ${(t as { type: string }).type}` }
   } catch (err) { return { status: 'failed', error: err instanceof Error ? err.message : String(err) } }
 }
 

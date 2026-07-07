@@ -40,6 +40,13 @@ export interface ExistingVariableTarget {
   variableName: string
   collectionName: string
   resolvedType: string
+  /**
+   * Which VariableBindableTextField to bind this variable to.
+   * If omitted, the apply engine auto-selects based on resolvedType:
+   *   FLOAT   → 'fontSize'
+   *   STRING  → 'fontFamily'
+   */
+  targetField?: 'fontFamily' | 'fontSize' | 'fontStyle' | 'fontWeight' | 'letterSpacing' | 'lineHeight' | 'paragraphSpacing' | 'paragraphIndent'
 }
 
 export interface NewStyleTarget {
@@ -57,7 +64,6 @@ export interface NewStyleTarget {
   textDecoration: string
 }
 
-/** Sprint 7: Create a planned typography variable (not created in Figma yet). */
 export interface NewVariableTarget {
   type: 'new-variable'
   variableName: string

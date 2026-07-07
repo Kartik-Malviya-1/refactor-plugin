@@ -43,7 +43,6 @@ function logCoverage(ps: PreloadStats, ms: number, groups: AuditResult['groups']
   for (const g of groups) if (g.count !== g.items.length) console.error(`[Refactor] USAGE ERROR "${g.label}"`)
 }
 
-/** Switch to a page, select nodes by ID, and zoom to fit. */
 async function navigateAndSelect(pageId: string, nodeIds: string[]): Promise<void> {
   const page = figma.root.children.find(p => p.id === pageId)
   if (!page || page.type !== 'PAGE') return
@@ -54,10 +53,7 @@ async function navigateAndSelect(pageId: string, nodeIds: string[]): Promise<voi
     if (n && (n.type === 'TEXT' || n.type === 'FRAME' || n.type === 'COMPONENT' || n.type === 'INSTANCE'))
       nodes.push(n as unknown as SceneNode)
   }
-  if (nodes.length) {
-    figma.currentPage.selection = nodes
-    figma.viewport.scrollAndZoomIntoView(nodes)
-  }
+  if (nodes.length) { figma.currentPage.selection = nodes; figma.viewport.scrollAndZoomIntoView(nodes) }
 }
 
 figma.ui.onmessage = async (rawMsg: unknown) => {
@@ -77,9 +73,6 @@ figma.ui.onmessage = async (rawMsg: unknown) => {
       else send({ type: 'NAVIGATION_ERROR', payload: { error: out.error.message, code: out.error.code } })
       break
     }
-
-    // Review navigation: switch page + select affected text nodes so user
-    // can see exactly which layers will change before clicking Apply.
     case 'REVIEW_NAVIGATE': {
       const { pageId, layerIds } = msg.payload
       try {
@@ -91,49 +84,33 @@ figma.ui.onmessage = async (rawMsg: unknown) => {
       }
       break
     }
-    case 'REVIEW_CLEAR_HIGHLIGHTS': {
-      try { figma.currentPage.selection = [] } catch {}; break
-    }
-
-    // Post-apply highlight: navigate to a page and select changed nodes.
+    case 'REVIEW_CLEAR_HIGHLIGHTS': { try { figma.currentPage.selection = [] } catch {}; break }
     case 'HIGHLIGHT_NODES': {
       const { pageId, nodeIds } = msg.payload
-      try { await navigateAndSelect(pageId, nodeIds) } catch (err) {
-        console.error('[Refactor] HIGHLIGHT_NODES failed:', err)
-      }
+      try { await navigateAndSelect(pageId, nodeIds) } catch (err) { console.error('[Refactor] HIGHLIGHT_NODES failed:', err) }
       break
     }
-
     case 'GENERATE_PREVIEW': {
       const { itemId, pageId, layerIds, mutations } = msg.payload
       try { const r = await generatePreview(pageId, layerIds, mutations); send({ type: 'PREVIEW_READY', payload: { itemId, before: r.before, after: r.after } }) }
       catch (err) { send({ type: 'PREVIEW_ERROR', payload: { itemId, error: err instanceof Error ? err.message : String(err) } }) }
       break
     }
-
     case 'APPLY_PLAN': {
       const { entries } = msg.payload
       console.log(`[Refactor] APPLY_PLAN: ${entries.length} entries`)
       try {
         const report = await runApplyEngine(entries, (p) => send({ type: 'APPLY_PROGRESS', payload: p }))
         send({ type: 'APPLY_COMPLETE', payload: report })
-
-        // Auto-highlight: immediately select all successfully changed nodes
-        // on the current page so the user can see what changed right away.
         const currentPageId = figma.currentPage.id
-        const successIds = report.results
-          .filter(r => r.status === 'success' && r.pageId === currentPageId)
-          .map(r => r.nodeId)
-        if (successIds.length > 0) {
-          try { await navigateAndSelect(currentPageId, successIds) } catch {}
-        }
+        const successIds = report.results.filter(r => r.status === 'success' && r.pageId === currentPageId).map(r => r.nodeId)
+        if (successIds.length > 0) { try { await navigateAndSelect(currentPageId, successIds) } catch {} }
       } catch (err) {
         console.error('[Refactor] APPLY_PLAN failed:', err)
         send({ type: 'APPLY_COMPLETE', payload: { startedAt: Date.now(), completedAt: Date.now(), durationMs: 0, totalNodes: entries.length, successful: 0, skipped: 0, failed: entries.length, blocked: 0, results: [] } })
       }
       break
     }
-
     case 'GET_PLANNING_DATA': {
       const tPlan = Date.now()
       let textStyles: AvailableTextStyle[] = getCatalogStyles()
@@ -143,18 +120,31 @@ figma.ui.onmessage = async (rawMsg: unknown) => {
           for (const s of local) { const fn = s.fontName as FontName; if (!fn || typeof fn.family !== 'string') continue; textStyles.push({ id: s.id, name: s.name, fontFamily: fn.family, fontStyle: fn.style, fontSize: typeof s.fontSize === 'number' ? s.fontSize : 0, isLocal: true }) }
         } catch (err) { console.error('[Refactor] planning fallback:', err) }
       }
+
+      // Variables: return ALL types from every local collection.
+      // Previously filtered to STRING|FLOAT only, which excluded valid
+      // token types. The apply engine handles binding per resolvedType.
       const variables: AvailableTypographyVariable[] = []
       try {
-        for (const c of figma.variables.getLocalVariableCollections()) {
-          for (const id of c.variableIds) { const v = figma.variables.getVariableById(id); if (v && (v.resolvedType === 'STRING' || v.resolvedType === 'FLOAT')) variables.push({ id: v.id, name: v.name, collectionName: c.name, resolvedType: v.resolvedType }) }
+        const collections = figma.variables.getLocalVariableCollections()
+        for (const c of collections) {
+          for (const id of c.variableIds) {
+            const v = figma.variables.getVariableById(id)
+            if (v) variables.push({
+              id: v.id,
+              name: v.name,
+              collectionName: c.name,
+              resolvedType: v.resolvedType as AvailableTypographyVariable['resolvedType'],
+            })
+          }
         }
-      } catch {}
+      } catch { /* variables API unavailable */ }
+
       const l = textStyles.filter(s=>s.isLocal).length, lib = textStyles.filter(s=>!s.isLocal).length
       console.log(`[Refactor] Planning: ${l}+${lib}=${textStyles.length} styles ${variables.length} vars (${Date.now()-tPlan}ms)`)
       if (DEBUG) console.log('[DEBUG]', JSON.stringify(textStyles.slice(0,3)))
       send({ type: 'PLANNING_DATA', payload: { textStyles, variables } }); break
     }
-
     case 'START_SCAN': {
       const { moduleId, scope } = msg.payload
       const adapter = getAdapter(moduleId)
