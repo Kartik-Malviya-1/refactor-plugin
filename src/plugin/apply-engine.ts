@@ -4,7 +4,8 @@ import type { NewStyleTarget, ManualValuesTarget } from '../shared/migration'
 const PROGRESS_BATCH = 50
 
 async function validateEntry(e: ApplyEntry): Promise<{ valid: boolean; reason?: string }> {
-  const node = figma.getNodeById(e.nodeId)
+  // figma.getNodeById is forbidden in dynamic-page mode — must use async variant
+  const node = await figma.getNodeByIdAsync(e.nodeId)
   if (!node) return { valid: false, reason: 'Node no longer exists' }
   if (node.type !== 'TEXT') return { valid: false, reason: `Expected TEXT, got ${node.type}` }
   if ((node as TextNode).locked) return { valid: false, reason: 'Node is locked' }
@@ -59,7 +60,8 @@ async function buildNewStyleCache(entries: ApplyEntry[]): Promise<Map<string, st
 }
 
 async function applyMutation(e: ApplyEntry, nsCache: Map<string, string>): Promise<{ status: MutationStatus; error?: string }> {
-  const node = figma.getNodeById(e.nodeId)
+  // figma.getNodeById is forbidden in dynamic-page mode
+  const node = await figma.getNodeByIdAsync(e.nodeId)
   if (!node || node.type !== 'TEXT') return { status: 'failed', error: 'Node missing or wrong type' }
   const tn = node as TextNode
   if (tn.locked) return { status: 'skipped', error: 'Node is locked' }

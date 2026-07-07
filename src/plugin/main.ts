@@ -66,11 +66,18 @@ figma.ui.onmessage = async (rawMsg: unknown) => {
         const page = figma.root.children.find(p => p.id === pageId)
         if (!page || page.type !== 'PAGE') { send({ type: 'REVIEW_NAVIGATED', payload: { success: false } }); break }
         await figma.setCurrentPageAsync(page as PageNode)
+        // figma.getNodeById is forbidden in dynamic-page mode — must use async variant
         const nodes: SceneNode[] = []
-        for (const id of layerIds) { const n = figma.getNodeById(id); if (n && n.type === 'TEXT') nodes.push(n as unknown as SceneNode) }
+        for (const id of layerIds) {
+          const n = await figma.getNodeByIdAsync(id)
+          if (n && n.type === 'TEXT') nodes.push(n as unknown as SceneNode)
+        }
         if (nodes.length) { figma.currentPage.selection = nodes; figma.viewport.scrollAndZoomIntoView(nodes) }
         send({ type: 'REVIEW_NAVIGATED', payload: { success: true } })
-      } catch { send({ type: 'REVIEW_NAVIGATED', payload: { success: false } }) }
+      } catch (err) {
+        console.error('[Refactor] REVIEW_NAVIGATE failed:', err)
+        send({ type: 'REVIEW_NAVIGATED', payload: { success: false } })
+      }
       break
     }
     case 'REVIEW_CLEAR_HIGHLIGHTS': { try { figma.currentPage.selection = [] } catch {}; break }
