@@ -40,12 +40,6 @@ export interface ExistingVariableTarget {
   variableName: string
   collectionName: string
   resolvedType: string
-  /**
-   * Which VariableBindableTextField to bind this variable to.
-   * If omitted, the apply engine auto-selects based on resolvedType:
-   *   FLOAT   → 'fontSize'
-   *   STRING  → 'fontFamily'
-   */
   targetField?: 'fontFamily' | 'fontSize' | 'fontStyle' | 'fontWeight' | 'letterSpacing' | 'lineHeight' | 'paragraphSpacing' | 'paragraphIndent'
 }
 
@@ -140,4 +134,76 @@ export interface AvailableTypographyVariable {
   name: string
   collectionName: string
   resolvedType: 'STRING' | 'FLOAT' | 'BOOLEAN' | 'COLOR'
+}
+
+// ---------------------------------------------------------------------------
+// Enhanced Discovery Types (v0.3.1)
+// ---------------------------------------------------------------------------
+
+export interface CollectionInfo {
+  id: string
+  name: string
+  isLocal: boolean
+  modes: string[]
+  variableCount: number
+}
+
+export interface DiscoveredVariable {
+  id: string
+  name: string
+  collectionId: string
+  collectionName: string
+  resolvedType: string
+  isLocal: boolean
+  resolvedValue: string | number | boolean | null
+  mode: string
+}
+
+export interface StylePropertyBinding {
+  property: string
+  variableId: string
+  variableName: string
+  collectionName: string
+}
+
+export interface EnhancedTextStyle {
+  id: string
+  name: string
+  isLocal: boolean
+  libraryName?: string
+  fontFamily: string
+  fontStyle: string
+  fontSize: number
+  lineHeight: string
+  letterSpacing: string
+  usesVariables: boolean
+  variableCount: number
+  bindings: StylePropertyBinding[]
+}
+
+export interface DiagnosticsData {
+  localStyleCount: number
+  libraryStyleCount: number
+  localVariableCount: number
+  libraryVariableCount: number
+  collectionCount: number
+  typographyCollectionCount: number
+  recipesGenerated: number
+  completeRecipes: number
+  partialRecipes: number
+  missingRecipes: number
+  failedRecipes: FailedRecipe[]
+}
+
+export interface FailedRecipe {
+  styleName: string
+  missingProperty: string
+  reason: string
+}
+
+export interface EnhancedPlanningData {
+  textStyles: EnhancedTextStyle[]
+  variables: DiscoveredVariable[]
+  collections: CollectionInfo[]
+  diagnostics: DiagnosticsData
 }

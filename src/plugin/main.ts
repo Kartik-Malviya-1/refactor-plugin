@@ -12,11 +12,13 @@ import { buildCatalogAsync, getCatalogStyles, clearCatalogCache } from './catalo
 import { generatePreview } from './preview-engine'
 import { runApplyEngine } from './apply-engine'
 import { navigateToLocations } from './navigation'
+import { discoverVariables } from './variable-discovery'
+import { discoverEnhancedStyles } from './style-discovery'
 import { runAllBenchmarks } from '../benchmarks/runner'
 import type { UIToPluginMessage, PluginToUIMessage } from '../shared/messages'
 import type { AuditResult } from '../shared/types'
 import type { TypographyProperties } from '../modules/typography/types'
-import type { AvailableTextStyle, AvailableTypographyVariable } from '../shared/migration'
+import type { AvailableTextStyle, AvailableTypographyVariable, EnhancedPlanningData, DiagnosticsData } from '../shared/migration'
 
 registerModule(typographyModule)
 registerAdapter(typographyScannerAdapter)
@@ -113,37 +115,68 @@ figma.ui.onmessage = async (rawMsg: unknown) => {
     }
     case 'GET_PLANNING_DATA': {
       const tPlan = Date.now()
+
+      // Stage 1: Enhanced style discovery with variable bindings
+      const enhancedStyles = await discoverEnhancedStyles()
+
+      // Stage 2: Variable discovery (local + library, async APIs)
+      const { variables: discoveredVars, collections } = await discoverVariables()
+
+      // Stage 3: Build legacy textStyles for backward compat
       let textStyles: AvailableTextStyle[] = getCatalogStyles()
       if (!textStyles.length) {
-        try {
-          const local = await figma.getLocalTextStylesAsync()
-          for (const s of local) { const fn = s.fontName as FontName; if (!fn || typeof fn.family !== 'string') continue; textStyles.push({ id: s.id, name: s.name, fontFamily: fn.family, fontStyle: fn.style, fontSize: typeof s.fontSize === 'number' ? s.fontSize : 0, isLocal: true }) }
-        } catch (err) { console.error('[Refactor] planning fallback:', err) }
+        textStyles = enhancedStyles.map(s => ({
+          id: s.id, name: s.name, fontFamily: s.fontFamily,
+          fontStyle: s.fontStyle, fontSize: s.fontSize,
+          isLocal: s.isLocal, libraryName: s.libraryName,
+        }))
       }
 
-      // Variables: return ALL types from every local collection.
-      // Previously filtered to STRING|FLOAT only, which excluded valid
-      // token types. The apply engine handles binding per resolvedType.
-      const variables: AvailableTypographyVariable[] = []
-      try {
-        const collections = figma.variables.getLocalVariableCollections()
-        for (const c of collections) {
-          for (const id of c.variableIds) {
-            const v = figma.variables.getVariableById(id)
-            if (v) variables.push({
-              id: v.id,
-              name: v.name,
-              collectionName: c.name,
-              resolvedType: v.resolvedType as AvailableTypographyVariable['resolvedType'],
-            })
-          }
-        }
-      } catch { /* variables API unavailable */ }
+      // Stage 4: Build legacy variables for backward compat
+      const legacyVars: AvailableTypographyVariable[] = discoveredVars.map(v => ({
+        id: v.id, name: v.name, collectionName: v.collectionName,
+        resolvedType: v.resolvedType as AvailableTypographyVariable['resolvedType'],
+      }))
+
+      // Stage 5: Diagnostics
+      const diagnostics: DiagnosticsData = {
+        localStyleCount: enhancedStyles.filter(s => s.isLocal).length,
+        libraryStyleCount: enhancedStyles.filter(s => !s.isLocal).length,
+        localVariableCount: discoveredVars.filter(v => v.isLocal).length,
+        libraryVariableCount: discoveredVars.filter(v => !v.isLocal).length,
+        collectionCount: collections.length,
+        typographyCollectionCount: 0,
+        recipesGenerated: 0,
+        completeRecipes: 0,
+        partialRecipes: 0,
+        missingRecipes: 0,
+        failedRecipes: [],
+      }
+
+      // Detect typography collections
+      const typoPropNames = ['font', 'size', 'weight', 'line', 'height', 'tracking', 'spacing', 'letter', 'family', 'text', 'typo']
+      for (const c of collections) {
+        const collVars = discoveredVars.filter(v => v.collectionId === c.id)
+        const hasTypoVars = collVars.some(v =>
+          typoPropNames.some(p => v.name.toLowerCase().includes(p))
+        )
+        if (hasTypoVars) diagnostics.typographyCollectionCount++
+      }
+
+      const enhancedData: EnhancedPlanningData = {
+        textStyles: enhancedStyles,
+        variables: discoveredVars,
+        collections,
+        diagnostics,
+      }
 
       const l = textStyles.filter(s=>s.isLocal).length, lib = textStyles.filter(s=>!s.isLocal).length
-      console.log(`[Refactor] Planning: ${l}+${lib}=${textStyles.length} styles ${variables.length} vars (${Date.now()-tPlan}ms)`)
-      if (DEBUG) console.log('[DEBUG]', JSON.stringify(textStyles.slice(0,3)))
-      send({ type: 'PLANNING_DATA', payload: { textStyles, variables } }); break
+      console.log(`[Refactor] Planning: ${l}+${lib}=${textStyles.length} styles, ${discoveredVars.length} vars (${diagnostics.localVariableCount}L+${diagnostics.libraryVariableCount}Lib), ${collections.length} collections (${Date.now()-tPlan}ms)`)
+
+      // Send both legacy and enhanced data
+      send({ type: 'PLANNING_DATA', payload: { textStyles, variables: legacyVars } })
+      send({ type: 'ENHANCED_PLANNING_DATA', payload: enhancedData })
+      break
     }
     case 'START_SCAN': {
       const { moduleId, scope } = msg.payload

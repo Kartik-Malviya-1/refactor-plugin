@@ -98,10 +98,8 @@ export function RawValuesPage() {
   const { assignments } = useAssignmentStore()
   const { selectGroup, setSearchQuery, navigate } = useUIStore()
   const { expression, addCondition, removeCondition, updateCondition, toggleCondition, clearAll } = useQueryStore()
-  const { textStyles, variables, loaded: planningLoaded, loading: planningLoading } = usePlanningDataStore()
+  const { textStyles, variables, enhanced, loaded: planningLoaded, loading: planningLoading } = usePlanningDataStore()
 
-  // All useState declarations must come before any useMemo that references them.
-  // Placing them after causes a TDZ ReferenceError during dependency-array evaluation.
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [search, setSearch]     = useState('')
 
@@ -141,7 +139,6 @@ export function RawValuesPage() {
     )
   }, [workingSetGroups, search])
 
-  // selectedGroups keyed by AuditGroup.key (canonical identifier)
   const selectedGroups = useMemo(() =>
     workingSetGroups.filter(g => selected.has(g.key)),
     [workingSetGroups, selected]
@@ -168,8 +165,9 @@ export function RawValuesPage() {
   function handleExport() {
     if (!result) return
     exportWorkbook({
-      result: result as unknown as import('../../../shared/types').AuditResult<TypographyProperties>,
+      result: result as unknown as import('../../../shared/types').AuditResult<import('../../../modules/typography/types').TypographyProperties>,
       assignments,
+      enhanced,
       textStyles,
       variables,
     })
@@ -262,7 +260,7 @@ export function RawValuesPage() {
               </>
             ) : (
               <>
-                <p className="text-sm font-medium text-ink">No signatures match "{search}"</p>
+                <p className="text-sm font-medium text-ink">No signatures match \"{search}\"</p>
                 <p className="text-xs text-ink-3">Try a different search term.</p>
               </>
             )}

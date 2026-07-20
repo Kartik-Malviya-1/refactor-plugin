@@ -8,8 +8,6 @@ import { buildStyleRows } from './styles-sheet'
 import { buildRecipeRows } from './recipe-sheet'
 import { buildSummaryRows } from './summary-sheet'
 
-const HEADER_STYLE = { font: { bold: true } }
-
 function autoWidth(ws: XLSX.WorkSheet, data: Record<string, unknown>[]): void {
   if (data.length === 0) return
   const keys = Object.keys(data[0])
@@ -34,11 +32,10 @@ function addSheet(
 
   headers.forEach((h, i) => {
     const cell = XLSX.utils.encode_cell({ r: 0, c: i })
-    ws[cell] = { v: h, t: 's', s: HEADER_STYLE }
+    ws[cell] = { v: h, t: 's', s: { font: { bold: true } } }
   })
 
   autoWidth(ws, rows)
-
   ws['!freeze'] = { xSplit: 0, ySplit: 1 }
 
   const range = XLSX.utils.decode_range(ws['!ref'] ?? 'A1')
@@ -51,21 +48,26 @@ function addSheet(
 export function buildWorkbook(data: ExportData): XLSX.WorkBook {
   const wb = XLSX.utils.book_new()
   const groups = data.result.groups as AuditGroup<TypographyProperties>[]
+  const totalLayers = groups.reduce((s, g) => s + g.count, 0)
 
-  const sigRows = buildSignatureRows(groups, data.assignments)
+  // Sheet 1: Raw Typography Signatures
+  const sigRows = buildSignatureRows(groups, data.assignments, totalLayers)
   if (sigRows.length > 0) {
     addSheet(wb, 'Raw Typography Signatures', [
-      'Signature Key', 'Font Family', 'Font Weight', 'Font Size',
+      'Signature ID', 'Signature Label', 'Signature Key',
+      'Font Family', 'Font Weight', 'Font Size',
       'Line Height', 'Letter Spacing', 'Text Case', 'Text Decoration',
       'Source Type', 'Layer Count', 'Component Count', 'Page Count',
+      'Usage %', 'Rank', 'Priority',
       'Current Style', 'Current Variable',
-      'Target Token', 'Status', 'Notes',
+      'Target Token', 'Confidence', 'Status', 'Notes',
     ], sigRows)
   } else {
     const ws = XLSX.utils.aoa_to_sheet([['No signatures found']])
     XLSX.utils.book_append_sheet(wb, ws, 'Raw Typography Signatures')
   }
 
+  // Sheet 2: Usage Report
   const usageRows = buildUsageRows(groups)
   if (usageRows.length > 0) {
     addSheet(wb, 'Usage Report', [
@@ -76,30 +78,52 @@ export function buildWorkbook(data: ExportData): XLSX.WorkBook {
     XLSX.utils.book_append_sheet(wb, ws, 'Usage Report')
   }
 
-  const styleRows = buildStyleRows(data.textStyles)
+  // Sheet 3: Existing Typography Styles
+  const styleRows = buildStyleRows(
+    data.enhanced?.textStyles ?? null,
+    data.textStyles,
+  )
   if (styleRows.length > 0) {
     addSheet(wb, 'Existing Typography Styles', [
-      'Style Name', 'Source', 'Font Family', 'Font Weight',
-      'Font Size', 'Line Height', 'Letter Spacing', 'Style ID',
+      'Style Name', 'Style ID', 'Collection', 'Source',
+      'Font Family', 'Font Weight', 'Font Size',
+      'Line Height', 'Letter Spacing',
+      'Uses Variables', 'Variable Count', 'Bound Variables',
     ], styleRows)
   } else {
     const ws = XLSX.utils.aoa_to_sheet([['No styles found']])
     XLSX.utils.book_append_sheet(wb, ws, 'Existing Typography Styles')
   }
 
-  const recipeRows = buildRecipeRows(data.variables)
-  if (recipeRows.length > 0) {
+  // Sheet 4: Typography Recipes
+  const recipeResult = buildRecipeRows(
+    data.enhanced?.textStyles ?? null,
+    data.enhanced?.variables ?? null,
+    data.variables,
+  )
+  if (recipeResult.rows.length > 0) {
     addSheet(wb, 'Typography Recipes', [
       'Target Token', 'Font Family Variable', 'Font Size Variable',
       'Font Weight Variable', 'Line Height Variable', 'Letter Spacing Variable',
-    ], recipeRows)
+      'Recipe Status',
+    ], recipeResult.rows)
   } else {
-    const ws = XLSX.utils.aoa_to_sheet([['No typography variables found']])
+    const ws = XLSX.utils.aoa_to_sheet([['No typography variables found — verify variable collections exist in this file']])
     XLSX.utils.book_append_sheet(wb, ws, 'Typography Recipes')
   }
 
-  const summaryRows = buildSummaryRows(groups, data.textStyles, data.variables)
-  addSheet(wb, 'Summary', ['Metric', 'Value'], summaryRows)
+  // Sheet 5: Summary & Diagnostics
+  const summaryRows = buildSummaryRows(groups, data.enhanced, recipeResult)
+  addSheet(wb, 'Summary & Diagnostics', ['Metric', 'Value'], summaryRows)
+
+  // Update diagnostics with recipe counts
+  if (data.enhanced) {
+    data.enhanced.diagnostics.recipesGenerated = recipeResult.rows.length
+    data.enhanced.diagnostics.completeRecipes = recipeResult.completeCount
+    data.enhanced.diagnostics.partialRecipes = recipeResult.partialCount
+    data.enhanced.diagnostics.missingRecipes = recipeResult.missingCount
+    data.enhanced.diagnostics.failedRecipes = recipeResult.failedRecipes
+  }
 
   return wb
 }

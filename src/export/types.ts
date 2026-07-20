@@ -1,16 +1,20 @@
-import type { AuditGroup, AuditResult } from '../shared/types'
+import type { AuditResult } from '../shared/types'
 import type { TypographyProperties } from '../modules/typography/types'
-import type { AvailableTextStyle, AvailableTypographyVariable } from '../shared/migration'
 import type { AssignedTarget } from '../clustering/types'
+import type { EnhancedPlanningData } from '../shared/migration'
 
 export interface ExportData {
   result: AuditResult<TypographyProperties>
   assignments: Record<string, AssignedTarget>
-  textStyles: AvailableTextStyle[]
-  variables: AvailableTypographyVariable[]
+  enhanced: EnhancedPlanningData | null
+  // Legacy fallback fields
+  textStyles: import('../shared/migration').AvailableTextStyle[]
+  variables: import('../shared/migration').AvailableTypographyVariable[]
 }
 
 export interface SignatureRow {
+  signatureId: string
+  signatureLabel: string
   signatureKey: string
   fontFamily: string
   fontWeight: number
@@ -23,9 +27,13 @@ export interface SignatureRow {
   layerCount: number
   componentCount: number
   pageCount: number
+  usagePercent: string
+  rank: number
+  priority: string
   currentStyle: string
   currentVariable: string
   targetToken: string
+  confidence: string
   status: string
   notes: string
 }
@@ -41,13 +49,17 @@ export interface UsageRow {
 
 export interface StyleRow {
   styleName: string
+  styleId: string
+  collection: string
   source: string
   fontFamily: string
   fontWeight: string
   fontSize: number
   lineHeight: string
   letterSpacing: string
-  styleId: string
+  usesVariables: string
+  variableCount: number
+  boundVariables: string
 }
 
 export interface RecipeRow {
@@ -57,6 +69,7 @@ export interface RecipeRow {
   fontWeightVariable: string
   lineHeightVariable: string
   letterSpacingVariable: string
+  recipeStatus: string
 }
 
 export interface SummaryRow {

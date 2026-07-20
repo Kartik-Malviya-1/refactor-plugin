@@ -1,6 +1,6 @@
 import type { AuditResult, ScanProgress, ScanScope } from './types'
 import type { NodeLocation, NavigationErrorCode } from './navigation'
-import type { AvailableTextStyle, AvailableTypographyVariable } from './migration'
+import type { AvailableTextStyle, AvailableTypographyVariable, EnhancedPlanningData } from './migration'
 import type { ApplyEntry, ApplyProgress, MigrationReport } from './apply-types'
 
 export interface LayerMutation {
@@ -21,7 +21,6 @@ export type UIToPluginMessage =
   | { type: 'REVIEW_CLEAR_HIGHLIGHTS' }
   | { type: 'GENERATE_PREVIEW';  payload: { itemId: string; pageId: string; layerIds: string[]; mutations: LayerMutation[] } }
   | { type: 'APPLY_PLAN';        payload: { entries: ApplyEntry[] } }
-  /** Navigate to a page and select + zoom to specific nodes. Used for post-apply highlighting. */
   | { type: 'HIGHLIGHT_NODES';   payload: { pageId: string; nodeIds: string[] } }
 
 export type PluginToUIMessage =
@@ -34,6 +33,7 @@ export type PluginToUIMessage =
   | { type: 'NODES_SELECTED';    payload: { count: number; pageChanged: boolean; pageName: string; notFound: number } }
   | { type: 'NAVIGATION_ERROR';  payload: { error: string; code: NavigationErrorCode } }
   | { type: 'PLANNING_DATA';     payload: { textStyles: AvailableTextStyle[]; variables: AvailableTypographyVariable[] } }
+  | { type: 'ENHANCED_PLANNING_DATA'; payload: EnhancedPlanningData }
   | { type: 'SHOW_USAGE_EXPLORER' }
   | { type: 'REVIEW_NAVIGATED';  payload: { success: boolean } }
   | { type: 'PREVIEW_READY';     payload: { itemId: string; before: string; after: string } }
