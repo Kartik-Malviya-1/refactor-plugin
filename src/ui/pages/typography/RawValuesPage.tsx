@@ -1,5 +1,5 @@
 import { useState, useMemo, useEffect } from 'react'
-import { Layers, MousePointerClick } from 'lucide-react'
+import { Layers, MousePointerClick, Download } from 'lucide-react'
 import { useAuditStore } from '../../store/audit'
 import { useAssignmentStore } from '../../store/assignment'
 import { useUIStore } from '../../store/ui'
@@ -13,6 +13,7 @@ import { evaluateQuery } from '../../../query/evaluator'
 import { computeStatistics } from '../../../query/working-set'
 import { locationFromItem } from '../../../shared/navigation'
 import { sendToPlugin } from '../../hooks/useSendMessage'
+import { exportWorkbook } from '../../../export/workbook-exporter'
 import type { AuditGroup } from '../../../shared/types'
 import type { TypographyProperties } from '../../../modules/typography/types'
 import type { SourceType } from '../../../shared/types'
@@ -97,7 +98,7 @@ export function RawValuesPage() {
   const { assignments } = useAssignmentStore()
   const { selectGroup, setSearchQuery, navigate } = useUIStore()
   const { expression, addCondition, removeCondition, updateCondition, toggleCondition, clearAll } = useQueryStore()
-  const { loaded: planningLoaded, loading: planningLoading } = usePlanningDataStore()
+  const { textStyles, variables, loaded: planningLoaded, loading: planningLoading } = usePlanningDataStore()
 
   // All useState declarations must come before any useMemo that references them.
   // Placing them after causes a TDZ ReferenceError during dependency-array evaluation.
@@ -164,6 +165,16 @@ export function RawValuesPage() {
     navigate('typography/signatures')
   }
 
+  function handleExport() {
+    if (!result) return
+    exportWorkbook({
+      result: result as unknown as import('../../../shared/types').AuditResult<TypographyProperties>,
+      assignments,
+      textStyles,
+      variables,
+    })
+  }
+
   const allSelected  = workingSetGroups.length > 0 && workingSetGroups.every(g => selected.has(g.key))
   const someSelected = selected.size > 0 && !allSelected
   const dominant     = selectedGroups[0]?.descriptor ?? workingSetGroups[0]?.descriptor
@@ -214,6 +225,14 @@ export function RawValuesPage() {
             <button onClick={clearSel}  className="text-2xs text-ink-3 hover:text-ink transition-colors">Clear</button>
           </div>
         )}
+        <button
+          onClick={handleExport}
+          className="flex items-center gap-1.5 px-2.5 py-1.5 text-2xs font-medium text-ink-2 bg-surface-1 border border-border-subtle rounded-md hover:bg-surface-hover hover:text-ink transition-colors shrink-0"
+          title="Export migration workbook (.xlsx)"
+        >
+          <Download className="w-3 h-3" />
+          Export
+        </button>
       </div>
 
       {/* Column headers */}
