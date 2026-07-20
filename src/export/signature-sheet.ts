@@ -1,6 +1,5 @@
 import type { AuditGroup } from '../shared/types'
 import type { TypographyProperties } from '../modules/typography/types'
-import type { AssignedTarget } from '../clustering/types'
 import {
   formatLineHeight, formatLetterSpacing, formatTextCase, formatTextDecoration,
 } from '../modules/typography/normalizer'
@@ -8,13 +7,13 @@ import type { SignatureRow } from './types'
 
 function sourceLabel(group: AuditGroup<TypographyProperties>): string {
   const src = group.descriptor.source
-  if (!src) return 'Raw Values'
+  if (!src) return 'Raw'
   switch (src.type) {
-    case 'Raw':          return 'Raw Values'
-    case 'LocalStyle':   return 'Local Text Style'
-    case 'LibraryStyle': return 'Library Text Style'
+    case 'Raw':          return 'Raw'
+    case 'LocalStyle':   return 'Local Style'
+    case 'LibraryStyle': return 'Library Style'
     case 'Variable':     return 'Variable'
-    default:             return 'Unknown'
+    default:             return 'Raw'
   }
 }
 
@@ -27,48 +26,23 @@ function currentStyleName(group: AuditGroup<TypographyProperties>): string {
   return ''
 }
 
-function currentVariableName(group: AuditGroup<TypographyProperties>): string {
-  const src = group.descriptor.source
-  if (!src) return ''
-  if (src.type === 'Variable') {
-    return src.variableName ?? ''
-  }
-  return ''
-}
-
-function targetLabel(assignment: AssignedTarget | undefined): string {
-  if (!assignment) return ''
-  return assignment.label
-}
-
-function statusLabel(assignment: AssignedTarget | undefined): string {
-  if (!assignment) return 'Pending'
-  switch (assignment.target.type) {
-    case 'existing-style':    return 'Mapped'
-    case 'existing-variable': return 'Mapped'
-    case 'new-style':         return 'Mapped'
-    case 'manual-values':     return 'Mapped'
-    case 'skip':              return 'Skip'
-    default:                  return 'Pending'
-  }
-}
-
-function confidenceLabel(assignment: AssignedTarget | undefined): string {
-  if (!assignment) return ''
-  return 'Manual'
-}
-
-function priorityLabel(layerCount: number, componentCount: number, pageCount: number): string {
-  if (layerCount >= 100 || componentCount >= 20) return 'Critical'
-  if (layerCount >= 50 || componentCount >= 10) return 'High'
-  if (layerCount >= 10 || pageCount >= 3) return 'Medium'
-  return 'Low'
+function weightName(fontStyle: string): string {
+  const s = fontStyle.toLowerCase()
+  if (s.includes('thin')) return 'Thin'
+  if (s.includes('extralight') || s.includes('extra light') || s.includes('ultralight')) return 'ExtraLight'
+  if (s.includes('light')) return 'Light'
+  if (s.includes('medium')) return 'Medium'
+  if (s.includes('semibold') || s.includes('semi bold') || s.includes('demibold')) return 'SemiBold'
+  if (s.includes('extrabold') || s.includes('extra bold') || s.includes('ultrabold')) return 'ExtraBold'
+  if (s.includes('heavy') || s.includes('black')) return 'Black'
+  if (s.includes('bold')) return 'Bold'
+  return 'Regular'
 }
 
 function buildSignatureLabel(p: TypographyProperties): string {
   const lh = formatLineHeight(p.lineHeight)
   const ls = formatLetterSpacing(p.letterSpacing)
-  let label = `${p.fontFamily} ${p.fontStyle} • ${p.fontSize}`
+  let label = `${p.fontFamily} ${weightName(p.fontStyle)} • ${p.fontSize}`
   if (lh !== 'Auto') label += ` / ${lh}`
   if (ls !== '0') label += ` • ${ls}`
   return label
@@ -76,56 +50,45 @@ function buildSignatureLabel(p: TypographyProperties): string {
 
 function sortKey(g: AuditGroup<TypographyProperties>): string {
   const p = g.descriptor
-  const compCount = g.items.filter(i =>
-    i.parentType === 'COMPONENT' || i.parentType === 'COMPONENT_SET' || i.parentType === 'INSTANCE'
-  ).length
-  const prio = priorityLabel(g.count, compCount, new Set(g.items.map(i => i.pageId)).size)
-  const prioOrder = prio === 'Critical' ? '0' : prio === 'High' ? '1' : prio === 'Medium' ? '2' : '3'
-  return `${prioOrder}|${String(99999 - g.count).padStart(6, '0')}|${String(p.fontSize).padStart(6, '0')}|${String(p.fontWeight).padStart(4, '0')}`
+  const layerDesc = String(99999 - g.count).padStart(6, '0')
+  const sizeAsc = String(p.fontSize).padStart(6, '0')
+  const weightAsc = String(p.fontWeight).padStart(4, '0')
+  const familyAsc = p.fontFamily.toLowerCase()
+  return `${layerDesc}|${sizeAsc}|${weightAsc}|${familyAsc}`
 }
 
 export function buildSignatureRows(
   groups: AuditGroup<TypographyProperties>[],
-  assignments: Record<string, AssignedTarget>,
-  totalLayers: number,
 ): SignatureRow[] {
   const sorted = [...groups].sort((a, b) => sortKey(a).localeCompare(sortKey(b)))
 
   return sorted.map((group, index) => {
     const p = group.descriptor
-    const assignment = assignments[group.key]
 
     const uniquePages = new Set(group.items.map(i => i.pageId))
     const componentCount = group.items.filter(i =>
       i.parentType === 'COMPONENT' || i.parentType === 'COMPONENT_SET' || i.parentType === 'INSTANCE'
     ).length
 
-    const usagePct = totalLayers > 0 ? ((group.count / totalLayers) * 100) : 0
+    const exampleText = (group.items[0]?.nodeName ?? '').slice(0, 80)
 
     return {
       signatureId: `TYPO-${String(index + 1).padStart(4, '0')}`,
       signatureLabel: buildSignatureLabel(p),
-      signatureKey: group.key,
       fontFamily: p.fontFamily,
-      fontWeight: p.fontWeight,
+      weightName: weightName(p.fontStyle),
+      weightValue: p.fontWeight,
       fontSize: p.fontSize,
       lineHeight: formatLineHeight(p.lineHeight),
       letterSpacing: formatLetterSpacing(p.letterSpacing),
       textCase: formatTextCase(p.textCase),
       textDecoration: formatTextDecoration(p.textDecoration),
-      sourceType: sourceLabel(group),
       layerCount: group.count,
-      componentCount,
       pageCount: uniquePages.size,
-      usagePercent: `${usagePct.toFixed(1)}%`,
-      rank: index + 1,
-      priority: priorityLabel(group.count, componentCount, uniquePages.size),
+      componentCount,
+      exampleText,
       currentStyle: currentStyleName(group),
-      currentVariable: currentVariableName(group),
-      targetToken: targetLabel(assignment),
-      confidence: confidenceLabel(assignment),
-      status: statusLabel(assignment),
-      notes: '',
+      source: sourceLabel(group),
     }
   })
 }

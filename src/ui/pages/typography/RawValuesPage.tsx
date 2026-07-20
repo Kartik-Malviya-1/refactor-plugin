@@ -1,10 +1,9 @@
-import { useState, useMemo, useEffect } from 'react'
+import { useState, useMemo } from 'react'
 import { Layers, MousePointerClick, Download } from 'lucide-react'
 import { useAuditStore } from '../../store/audit'
 import { useAssignmentStore } from '../../store/assignment'
 import { useUIStore } from '../../store/ui'
 import { useQueryStore } from '../../store/query'
-import { usePlanningDataStore } from '../../store/planningData'
 import { QueryBuilder } from '../../components/query/QueryBuilder'
 import { AssignmentDrawer } from '../../components/working-set/AssignmentDrawer'
 import { SearchInput } from '../../components/ui/SearchInput'
@@ -98,16 +97,9 @@ export function RawValuesPage() {
   const { assignments } = useAssignmentStore()
   const { selectGroup, setSearchQuery, navigate } = useUIStore()
   const { expression, addCondition, removeCondition, updateCondition, toggleCondition, clearAll } = useQueryStore()
-  const { textStyles, variables, enhanced, loaded: planningLoaded, loading: planningLoading } = usePlanningDataStore()
 
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [search, setSearch]     = useState('')
-
-  useEffect(() => {
-    if (!planningLoaded && !planningLoading) {
-      sendToPlugin({ type: 'GET_PLANNING_DATA' })
-    }
-  }, [planningLoaded, planningLoading])
 
   const allGroups = useMemo(() =>
     (result?.groups ?? []) as unknown as AuditGroup<TypographyProperties>[],
@@ -166,10 +158,6 @@ export function RawValuesPage() {
     if (!result) return
     exportWorkbook({
       result: result as unknown as import('../../../shared/types').AuditResult<import('../../../modules/typography/types').TypographyProperties>,
-      assignments,
-      enhanced,
-      textStyles,
-      variables,
     })
   }
 
@@ -226,7 +214,7 @@ export function RawValuesPage() {
         <button
           onClick={handleExport}
           className="flex items-center gap-1.5 px-2.5 py-1.5 text-2xs font-medium text-ink-2 bg-surface-1 border border-border-subtle rounded-md hover:bg-surface-hover hover:text-ink transition-colors shrink-0"
-          title="Export migration workbook (.xlsx)"
+          title="Export typography signatures (.xlsx)"
         >
           <Download className="w-3 h-3" />
           Export
