@@ -2,13 +2,13 @@
  * Preview Engine — generates before/after PNG previews for review items.
  *
  * Implementation: clone-frame approach.
- *   1. Export the original frame as-is (the \"before\" image).
+ *   1. Export the original frame as-is (the "before" image).
  *   2. Clone the frame to an off-canvas position.
  *   3. Walk the original and clone trees in parallel to locate the clone
  *      counterparts of each changed text node.
  *   4. Pre-load all fonts required by the planned mutations.
  *   5. Apply typography mutations to clone text nodes only.
- *   6. Export the clone (the \"after\" image).
+ *   6. Export the clone (the "after" image).
  *   7. Remove the clone — no trace remains in the document.
  *
  * The original frame is never mutated. The only undo entries created are
@@ -95,7 +95,7 @@ export async function generatePreview(
   await figma.setCurrentPageAsync(page as PageNode)
 
   // ── Find the parent frame ────────────────────────────────────────────
-  const anchorNode = figma.getNodeById(layerIds[0])
+  const anchorNode = await figma.getNodeByIdAsync(layerIds[0])
   if (!anchorNode) throw new Error(`Node not found: ${layerIds[0]}`)
 
   const frame = findFrameAncestor(anchorNode)
